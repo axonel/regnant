@@ -3,7 +3,7 @@
  * Version: 1.2.0
  */
 
-export const PROTOCOL_VERSION = '1.2.0';
+export const PROTOCOL_VERSION = '1.2.1';
 export const SERVICE_TYPE = '_regnant._tcp';
 export const DEFAULT_PORT = 53317; // Firewall-friendly port pre-authorized in UFW rules
 export const PAIRING_CODE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -172,4 +172,8 @@ export const WS_EVENTS = {
   TERM_EXIT: 'TERM_EXIT',
   MEDIA_UPDATE: 'MEDIA_UPDATE',
   AUTOMATION_TRIGGERED: 'AUTOMATION_TRIGGERED',
+
+  // v1.2.1 Workspace & Lock Events
+  WORKSPACE_STATE: 'WORKSPACE_STATE',
+  LOCK_STATE: 'LOCK_STATE',
 };

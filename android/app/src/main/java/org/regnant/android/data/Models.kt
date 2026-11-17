@@ -325,3 +325,19 @@ data class WolStatusItem(
     val primaryMac: String? = null
 )
 
+// --- v1.2.1 Workspace Switcher & Laptop Lock Models ---
+
+data class WorkspaceState(
+    val workspaceId: Int = 1,
+    val workspaceName: String = "1",
+    val monitorName: String = "default",
+    val activeSlot: Int = 1,
+    val timestamp: Long = 0L
+)
+
+data class LockState(
+    val locked: Boolean? = false,
+    val state: String = "UNLOCKED",
+    val timestamp: Long = 0L
+)
+

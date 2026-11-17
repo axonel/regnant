@@ -98,10 +98,25 @@ export class HostServer {
       }
     });
 
+    // Start Hyprland event listener for real-time workspace tracking
+    hyprlandManager.startEventListener();
+    hyprlandManager.on('workspace', state => {
+      const payload = JSON.stringify({
+        type: 'WORKSPACE_STATE',
+        ...state
+      });
+      for (const ws of this.activeClients.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(payload); } catch {}
+        }
+      }
+    });
+
     this.setupHeartbeat();
   }
 
   stop() {
+    hyprlandManager.stopEventListener();
     scheduler.stop();
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
@@ -537,6 +552,15 @@ export class HostServer {
     }
 
     // 13. Power & Lock Controls API
+    if (req.method === 'GET' && pathname === '/api/v1/power/lock-status') {
+      try {
+        const result = powerManager.getLockStatus();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
     if (req.method === 'POST' && pathname === '/api/v1/power/lock') {
       if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.POWER_CONTROLS)) {
         return this.sendJson(res, 403, { error: 'Permission denied: power controls are restricted' });
@@ -849,6 +873,44 @@ export class HostServer {
         else throw new Error(`Unknown hypr dispatch action: ${action}`);
 
         return this.sendJson(res, 200, { success: true });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2.1 Workspace Switcher & Synchronization ---
+    if (req.method === 'GET' && pathname === '/api/v1/hypr/active-workspace') {
+      try {
+        const activeWs = hyprlandManager.getActiveWorkspace();
+        const activeMon = hyprlandManager.getActiveMonitor();
+        return this.sendJson(res, 200, {
+          workspaceId: activeWs.id,
+          workspaceName: activeWs.name,
+          monitorName: activeWs.monitor || activeMon?.name || 'default',
+          activeSlot: activeWs.id,
+          timestamp: Date.now()
+        });
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/hypr/workspace') {
+      try {
+        const body = await this.parseBody(req);
+        const slot = parseInt(body.workspaceId || body.slot, 10);
+        if (isNaN(slot) || slot < 1 || slot > 5) {
+          return this.sendJson(res, 400, { error: 'Workspace ID must be an integer between 1 and 5' });
+        }
+        const state = hyprlandManager.switchWorkspace(slot, body.monitorName);
+        return this.sendJson(res, 200, {
+          success: true,
+          workspaceId: state.id,
+          workspaceName: state.name,
+          monitorName: state.monitor,
+          activeSlot: state.id,
+          timestamp: Date.now()
+        });
       } catch (err) {
         return this.sendJson(res, 400, { error: err.message });
       }
@@ -1388,6 +1450,29 @@ export class HostServer {
 
       this.broadcastStateUpdate();
       this.setupClientWebSocket(ws);
+
+      // Send initial authoritative workspace and lock states on connection
+      try {
+        const activeWs = hyprlandManager.getActiveWorkspace();
+        const activeMon = hyprlandManager.getActiveMonitor();
+        ws.send(JSON.stringify({
+          type: 'WORKSPACE_STATE',
+          workspaceId: activeWs.id,
+          workspaceName: activeWs.name,
+          monitorName: activeWs.monitor || activeMon?.name || 'default',
+          activeSlot: activeWs.id,
+          timestamp: Date.now()
+        }));
+      } catch {}
+
+      try {
+        const lockStatus = powerManager.getLockStatus();
+        ws.send(JSON.stringify({
+          type: 'LOCK_STATE',
+          ...lockStatus,
+          timestamp: Date.now()
+        }));
+      } catch {}
     });
   }
 
@@ -1398,6 +1483,27 @@ export class HostServer {
 
       try {
         const message = JSON.parse(data.toString());
+        if (message.type === 'SWITCH_WORKSPACE') {
+          try {
+            const slot = parseInt(message.workspaceId || message.slot, 10);
+            if (isNaN(slot) || slot < 1 || slot > 5) {
+              ws.send(JSON.stringify({ type: 'ERROR', message: 'Workspace ID must be between 1 and 5' }));
+              return;
+            }
+            const wsState = hyprlandManager.switchWorkspace(slot, message.monitorName);
+            ws.send(JSON.stringify({
+              type: 'WORKSPACE_STATE',
+              workspaceId: wsState.id,
+              workspaceName: wsState.name,
+              monitorName: wsState.monitor,
+              activeSlot: wsState.id,
+              timestamp: Date.now()
+            }));
+          } catch (err) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: err.message }));
+          }
+          return;
+        }
         if (message.type === WS_EVENTS.PING) {
           client.lastPing = Date.now();
           ws.send(JSON.stringify({ type: WS_EVENTS.PONG, timestamp: Date.now() }));

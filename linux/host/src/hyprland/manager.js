@@ -1,6 +1,16 @@
 import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import net from 'node:net';
+import path from 'node:path';
 
-export class HyprlandManager {
+export class HyprlandManager extends EventEmitter {
+  constructor() {
+    super();
+    this.socketClient = null;
+    this.reconnectTimer = null;
+    this._isListening = false;
+  }
+
   isAvailable() {
     try {
       const out = execFileSync('hyprctl', ['version'], {
@@ -11,6 +21,140 @@ export class HyprlandManager {
       return out.includes('Hyprland');
     } catch {
       return false;
+    }
+  }
+
+  getSocketPath() {
+    const xdg = process.env.XDG_RUNTIME_DIR || '/run/user/1000';
+    const sig = process.env.HYPRLAND_INSTANCE_SIGNATURE;
+    if (!sig) return null;
+    return path.join(xdg, 'hypr', sig, '.socket2.sock');
+  }
+
+  startEventListener() {
+    if (this._isListening) return;
+    this._isListening = true;
+    this._connectSocket();
+  }
+
+  _connectSocket() {
+    if (!this._isListening) return;
+    const socketPath = this.getSocketPath();
+    if (!socketPath) return;
+
+    try {
+      this.socketClient = net.createConnection(socketPath);
+
+      let buffer = '';
+      this.socketClient.on('data', chunk => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep last incomplete line
+
+        let wsChanged = false;
+        for (const line of lines) {
+          if (!line) continue;
+          if (line.startsWith('workspace>>') || line.startsWith('workspacev2>>') || line.startsWith('focusedmon>>')) {
+            wsChanged = true;
+          }
+        }
+
+        if (wsChanged) {
+          this._notifyWorkspaceChanged();
+        }
+      });
+
+      this.socketClient.on('error', () => {
+        this._scheduleReconnect();
+      });
+
+      this.socketClient.on('close', () => {
+        this._scheduleReconnect();
+      });
+    } catch {
+      this._scheduleReconnect();
+    }
+  }
+
+  _scheduleReconnect() {
+    if (this.socketClient) {
+      try { this.socketClient.destroy(); } catch {}
+      this.socketClient = null;
+    }
+    if (!this._isListening) return;
+    if (this.reconnectTimer) return;
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this._connectSocket();
+    }, 2000);
+  }
+
+  stopEventListener() {
+    this._isListening = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.socketClient) {
+      try { this.socketClient.destroy(); } catch {}
+      this.socketClient = null;
+    }
+  }
+
+  _notifyWorkspaceChanged() {
+    try {
+      const activeWs = this.getActiveWorkspace();
+      const activeMon = this.getActiveMonitor();
+      this.emit('workspace', {
+        workspaceId: activeWs.id,
+        workspaceName: activeWs.name,
+        monitorName: activeWs.monitor || activeMon?.name || 'default',
+        activeSlot: activeWs.id,
+        timestamp: Date.now()
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  getActiveWorkspace() {
+    try {
+      const out = execFileSync('hyprctl', ['-j', 'activeworkspace'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2000
+      });
+      const ws = JSON.parse(out);
+      return {
+        id: ws.id,
+        name: ws.name,
+        monitor: ws.monitor,
+        monitorId: ws.monitorID,
+        windowsCount: ws.windows || 0
+      };
+    } catch (err) {
+      return { id: 1, name: '1', monitor: 'default', monitorId: 0, windowsCount: 0 };
+    }
+  }
+
+  getActiveMonitor() {
+    try {
+      const out = execFileSync('hyprctl', ['-j', 'monitors'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 2000
+      });
+      const mons = JSON.parse(out);
+      const focused = mons.find(m => m.focused) || mons[0] || null;
+      return focused ? {
+        id: focused.id,
+        name: focused.name,
+        activeWorkspaceId: focused.activeWorkspace?.id || 1,
+        activeWorkspaceName: focused.activeWorkspace?.name || '1'
+      } : null;
+    } catch {
+      return null;
     }
   }
 
@@ -97,15 +241,37 @@ export class HyprlandManager {
     return true;
   }
 
-  switchWorkspace(workspaceId) {
+  switchWorkspace(workspaceId, monitorName = null) {
     const safeWs = parseInt(workspaceId, 10);
-    if (isNaN(safeWs)) throw new Error('Invalid workspace ID');
+    if (isNaN(safeWs) || safeWs < 1 || safeWs > 5) {
+      throw new Error('Workspace ID must be an integer between 1 and 5');
+    }
 
-    execFileSync('hyprctl', ['dispatch', 'workspace', String(safeWs)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 3000
-    });
-    return true;
+    // Method 1: Try Omarchy-native workspace switcher
+    try {
+      const monArg = monitorName ? `, "${monitorName}"` : '';
+      execFileSync('hyprctl', ['dispatch', `o.workspaces.focus(${safeWs}${monArg})`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 3000
+      });
+      return this.getActiveWorkspace();
+    } catch (omarchyErr) {
+      // Method 2: Fall back to native Hyprland Lua dispatcher
+      try {
+        execFileSync('hyprctl', ['dispatch', `hl.dsp.focus({ workspace = "${safeWs}" })`], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 3000
+        });
+        return this.getActiveWorkspace();
+      } catch {
+        // Method 3: Fall back to standard hyprctl workspace command
+        execFileSync('hyprctl', ['dispatch', 'workspace', String(safeWs)], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 3000
+        });
+        return this.getActiveWorkspace();
+      }
+    }
   }
 }
 
