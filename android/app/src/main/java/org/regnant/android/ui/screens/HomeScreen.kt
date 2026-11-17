@@ -1,6 +1,7 @@
 package org.regnant.android.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +41,7 @@ import org.regnant.android.network.RegnantClient
 import org.regnant.android.ui.components.QuickActionChips
 import org.regnant.android.ui.components.StatusHeader
 import org.regnant.android.ui.components.VoiceInputButton
+import org.regnant.android.ui.components.WorkspaceSelector
 import org.regnant.android.ui.theme.*
 
 @Composable
@@ -62,6 +64,9 @@ fun HomeScreen(
 
     var metrics by remember { mutableStateOf<HostMetrics?>(null) }
     var showLockDialog by remember { mutableStateOf(false) }
+
+    val workspaceState by client.workspaceState.collectAsState()
+    val activeWorkspaceId = workspaceState?.workspaceId ?: 1
 
     // Lightweight telemetry polling on home screen
     LaunchedEffect(connectionStatus) {
@@ -94,50 +99,108 @@ fun HomeScreen(
                 UnpairedCard(onNavigateToPairing = onNavigateToPairing)
             }
         } else {
-            // Live Mini Hardware Telemetry Banner
-            if (isConnected && metrics != null) {
-                item {
-                    val m = metrics!!
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(SurfaceCard)
-                            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
-                            .clickable(onClick = onNavigateToDashboard)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (m.battery.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
-                                contentDescription = null,
-                                tint = if (m.battery.percent > 20) StatusGreen else StatusRed,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("${m.battery.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+            // Workspace Selector prominently below StatusHeader
+            item {
+                WorkspaceSelector(
+                    activeWorkspaceId = activeWorkspaceId,
+                    onWorkspaceSelected = { slot ->
+                        coroutineScope.launch {
+                            val res = client.switchWorkspace(slot)
+                            if (res.isFailure) {
+                                Toast.makeText(
+                                    context,
+                                    "Failed to switch workspace: ${res.exceptionOrNull()?.message}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
+                    },
+                    enabled = isConnected,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Memory, contentDescription = null, tint = Coral, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("CPU ${m.cpuPercent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DeveloperBoard, contentDescription = null, tint = Leaf, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("RAM ${m.memory.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
-                        }
-
-                        IconButton(
-                            onClick = { showLockDialog = true },
-                            modifier = Modifier.size(24.dp)
+            // Live Mini Hardware Telemetry & Lock Control Banner
+            item {
+                val m = metrics
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SurfaceCard)
+                        .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (m != null) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(onClick = onNavigateToDashboard),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Lock, contentDescription = "Lock", tint = Coral, modifier = Modifier.size(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (m.battery.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
+                                    contentDescription = null,
+                                    tint = if (m.battery.percent > 20) StatusGreen else StatusRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("${m.battery.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Memory, contentDescription = null, tint = Coral, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("CPU ${m.cpuPercent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DeveloperBoard, contentDescription = null, tint = Leaf, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("RAM ${m.memory.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                            }
                         }
+                    } else {
+                        Text(
+                            text = if (isConnected) "Telemetry connecting..." else "Offline",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Replaced former small icon with dedicated "Lock Laptop" button
+                    OutlinedButton(
+                        onClick = { showLockDialog = true },
+                        enabled = isConnected,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = SurfaceDark,
+                            contentColor = Coral,
+                            disabledContentColor = TextMuted
+                        ),
+                        border = BorderStroke(1.dp, if (isConnected) Coral.copy(alpha = 0.6f) else SurfaceBorder),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = if (isConnected) Coral else TextMuted,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Lock Laptop",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isConnected) Candle else TextMuted
+                        )
                     }
                 }
             }
@@ -212,26 +275,72 @@ fun HomeScreen(
     }
 
     if (showLockDialog) {
+        val laptopName = pairedHost?.hostName ?: "Linux Laptop"
         AlertDialog(
             onDismissRequest = { showLockDialog = false },
             containerColor = SurfaceCard,
-            title = { Text("Lock Workstation?", color = Candle, fontWeight = FontWeight.Bold) },
-            text = { Text("Lock your Linux desktop session immediately.", color = TextMuted) },
+            shape = RoundedCornerShape(12.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Coral,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Lock $laptopName?",
+                        color = Candle,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Your laptop screen will lock immediately.",
+                        color = Candle,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "Unlocking requires physical entry of your password or fingerprint directly on the computer. Regnant cannot unlock your workstation remotely.",
+                        color = TextMuted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            },
             confirmButton = {
                 Button(
                     onClick = {
                         showLockDialog = false
                         coroutineScope.launch {
                             val res = client.lockWorkstation()
-                            if (res.isSuccess) Toast.makeText(context, "Workstation locked!", Toast.LENGTH_SHORT).show()
-                            else Toast.makeText(context, "Lock failed", Toast.LENGTH_SHORT).show()
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "Laptop locked", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Lock failed: ${res.exceptionOrNull()?.message ?: "Unknown error"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Coral)
-                ) { Text("Lock", color = Candle, fontWeight = FontWeight.Bold) }
+                    colors = ButtonDefaults.buttonColors(containerColor = Coral),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Lock", color = Candle, fontWeight = FontWeight.Bold)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { showLockDialog = false }) { Text("Cancel", color = TextMuted) }
+                TextButton(
+                    onClick = { showLockDialog = false }
+                ) {
+                    Text("Cancel", color = TextMuted)
+                }
             }
         )
     }

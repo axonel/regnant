@@ -56,6 +56,12 @@ class RegnantClient(
     private val _agentEvents = MutableSharedFlow<JsonObject>()
     val agentEvents: SharedFlow<JsonObject> = _agentEvents.asSharedFlow()
 
+    private val _workspaceState = MutableStateFlow<WorkspaceState?>(null)
+    val workspaceState: StateFlow<WorkspaceState?> = _workspaceState.asStateFlow()
+
+    private val _lockState = MutableStateFlow<LockState?>(null)
+    val lockState: StateFlow<LockState?> = _lockState.asStateFlow()
+
     private var activeWebSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
@@ -225,6 +231,10 @@ class RegnantClient(
                 reconnectJob?.cancel()
                 reconnectJob = null
                 startHeartbeat(webSocket)
+                scope.launch {
+                    getActiveWorkspace()
+                    getLockStatus()
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -317,6 +327,20 @@ class RegnantClient(
                 scope.launch { _terminalDataEvents.emit(Pair(sId, chunk)) }
             } else if (type == "AGENT_OUTPUT" || type == "AGENT_STATUS" || type == "AGENT_STARTED" || type == "AGENT_ERROR") {
                 scope.launch { _agentEvents.emit(json) }
+            } else if (type == "WORKSPACE_STATE") {
+                try {
+                    val ws = gson.fromJson(json, WorkspaceState::class.java)
+                    _workspaceState.value = ws
+                } catch (e: Exception) {
+                    Log.w(tag, "Failed to parse WORKSPACE_STATE", e)
+                }
+            } else if (type == "LOCK_STATE") {
+                try {
+                    val ls = gson.fromJson(json, LockState::class.java)
+                    _lockState.value = ls
+                } catch (e: Exception) {
+                    Log.w(tag, "Failed to parse LOCK_STATE", e)
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Error parsing incoming WS message: ${e.message}")
@@ -515,7 +539,56 @@ class RegnantClient(
 
     suspend fun lockWorkstation(): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val res = executeAuthRequest("/api/v1/power/lock", "POST", "{}", JsonObject::class.java)
-        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Lock failed"))
+        if (res.isSuccess) {
+            _lockState.value = LockState(locked = true, state = "LOCKED", timestamp = System.currentTimeMillis())
+            Result.success(true)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Lock failed"))
+        }
+    }
+
+    suspend fun getLockStatus(): Result<LockState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/power/lock-status", "GET", null, LockState::class.java)
+        if (res.isSuccess) {
+            val state = res.getOrNull()
+            if (state != null) _lockState.value = state
+            res
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get lock status"))
+        }
+    }
+
+    suspend fun getActiveWorkspace(): Result<WorkspaceState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/hypr/active-workspace", "GET", null, WorkspaceState::class.java)
+        if (res.isSuccess) {
+            val state = res.getOrNull()
+            if (state != null) _workspaceState.value = state
+            res
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get active workspace"))
+        }
+    }
+
+    suspend fun switchWorkspace(slot: Int, monitorName: String? = null): Result<WorkspaceState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        if (slot < 1 || slot > 5) return@withContext Result.failure(IllegalArgumentException("Workspace slot must be 1..5"))
+        val payload = JsonObject().apply {
+            addProperty("workspaceId", slot)
+            if (monitorName != null) addProperty("monitorName", monitorName)
+        }
+        val res = executeAuthRequest("/api/v1/hypr/workspace", "POST", payload.toString(), WorkspaceState::class.java)
+        if (res.isSuccess) {
+            val state = res.getOrNull()
+            if (state != null) _workspaceState.value = state
+            res
+        } else {
+            val msg = JsonObject().apply {
+                addProperty("type", "SWITCH_WORKSPACE")
+                addProperty("workspaceId", slot)
+                if (monitorName != null) addProperty("monitorName", monitorName)
+            }
+            sendWebSocketMessage(msg)
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to switch workspace"))
+        }
     }
 
     suspend fun suspendWorkstation(): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {

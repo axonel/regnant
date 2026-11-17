@@ -50,3 +50,34 @@ test('BrowserManager — token management and disconnected state safety', async 
   const tabsRes = await browser.getTabs();
   assert.equal(tabsRes.connected, false);
 });
+
+test('HyprlandManager — active workspace query and switch bounds validation', () => {
+  const hypr = new HyprlandManager();
+  if (hypr.isAvailable()) {
+    const active = hypr.getActiveWorkspace();
+    assert.ok(active);
+    assert.equal(typeof active.id, 'number');
+    assert.equal(typeof active.name, 'string');
+
+    // Test rejection of out-of-range workspace numbers
+    assert.throws(() => hypr.switchWorkspace(0), /Workspace ID must be an integer between 1 and 5/);
+    assert.throws(() => hypr.switchWorkspace(6), /Workspace ID must be an integer between 1 and 5/);
+    assert.throws(() => hypr.switchWorkspace('abc'), /Workspace ID must be an integer between 1 and 5/);
+    assert.throws(() => hypr.switchWorkspace(-1), /Workspace ID must be an integer between 1 and 5/);
+
+    // Switching to current workspace 1 is safe and valid
+    const current = hypr.switchWorkspace(1);
+    assert.ok(current);
+    assert.equal(typeof current.id, 'number');
+  }
+});
+
+test('PowerManager — lock status reporting', async () => {
+  const { PowerManager } = await import('../src/power.js');
+  const power = new PowerManager();
+  const status = power.getLockStatus();
+  assert.ok(status);
+  assert.ok('locked' in status);
+  assert.ok('state' in status);
+  assert.ok(['LOCKED', 'UNLOCKED', 'UNKNOWN'].includes(status.state));
+});

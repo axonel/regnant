@@ -1,4 +1,4 @@
-# REGNANT (v1.1.0)
+# REGNANT (v1.2.1)
 
 > Personal mobile control plane for Omarchy Linux workstation.
 
@@ -30,6 +30,14 @@ Regnant connects an Android smartphone directly to a Linux laptop over the local
        |  VS Code, Antigravity, Systemd     |
        +------------------------------------+
 ```
+
+---
+
+## What's New in v1.2.1
+
+- **Animated Hyprland Workspace Selector**: Prominently placed on Android Home screen (`1 — 2 — 3 — 4 — 5`) with smooth spring-based sliding indicator, supporting touch taps and horizontal drag gestures. Event-driven bi-directional synchronization directly bound to Hyprland's UNIX domain event socket (`.socket2.sock`) and Omarchy Lua dispatchers (`o.workspaces.focus`). Out-of-range workspaces (e.g. > 5) are cleanly flagged without falsely highlighting slot 5.
+- **Dedicated "Lock Laptop" Control**: Replaced ambiguous lock controls with a prominent, high-contrast "Lock Laptop" button on Android. Tapping opens an explicit confirmation dialog identifying the target machine (`Lock electron (Omarchy)?`) and stating the physical password/fingerprint requirement. Executes Omarchy's native `/usr/share/omarchy/bin/omarchy-system-lock` and reports `"Laptop locked"` status.
+- **Strict Security Boundary**: Regnant never stores, transmits, or accepts login passwords. Remote locking is strictly one-way; unlocking always requires physical entry on the workstation.
 
 ---
 
