@@ -31,6 +31,7 @@ export const ACTIONS = {
   APPS_LIST: 'apps_list',
   APPS_CLOSE: 'apps_close',
   POWER_LOCK: 'power_lock',
+  POWER_UNLOCK: 'power_unlock',
   POWER_SUSPEND: 'power_suspend',
   POWER_REBOOT: 'power_reboot',
   POWER_SHUTDOWN: 'power_shutdown',

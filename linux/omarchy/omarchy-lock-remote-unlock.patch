@@ -1,0 +1,66 @@
+--- /home/roonakyadav/.config/omarchy/plugins/roonakyadav.lock/Service.qml.orig	2026-11-17 22:15:05.808161398 +0530
++++ /home/roonakyadav/.config/omarchy/plugins/roonakyadav.lock/Service.qml	2026-11-17 22:16:16.131381045 +0530
+@@ -58,6 +58,7 @@
+   property string backgroundSignature: ""
+   property string lastEvent: "init"
+   property string lastEventAt: ""
++  property string lastRemoteAuthResult: "idle"
+   readonly property bool videoBackground: Util.isVideoPath(backgroundPath)
+   property bool strandedLock: false
+   property bool strandedLockResolved: false
+@@ -363,6 +364,7 @@
+     authenticatingPassword = true
+ 
+     if (!passwordPam.start()) {
++      lastRemoteAuthResult = "failure"
+       handlePasswordFailure()
+       return
+     }
+@@ -577,11 +579,17 @@
+       root.pendingPassword = ""
+ 
+       if (!root.lockRequested) return
+-      if (result === PamResult.Success) root.finishUnlock()
+-      else root.handlePasswordFailure()
++      if (result === PamResult.Success) {
++        root.lastRemoteAuthResult = "success"
++        root.finishUnlock()
++      } else {
++        root.lastRemoteAuthResult = "failure"
++        root.handlePasswordFailure()
++      }
+     }
+ 
+     onError: function(error) {
++      root.lastRemoteAuthResult = "failure"
+       root.handlePasswordFailure()
+     }
+   }
+@@ -876,6 +884,7 @@
+     target: "lock"
+ 
+     function lock(): string {
++      root.lastRemoteAuthResult = "idle"
+       if (!root.passwordPamConfigured) return "missing-pam"
+       // omarchy-system-sleep-lock asks for the lock before every suspend.
+       if (root.currentlyLocked()) root.noteSleepRequested()
+@@ -883,6 +892,19 @@
+       return "ok"
+     }
+ 
++    function unlockWithPassword(password: string): string {
++      if (!root.currentlyLocked()) return "not-locked"
++      if (!password || password.length === 0) return "empty-password"
++      if (root.authenticatingPassword) return "busy"
++      root.lastRemoteAuthResult = "pending"
++      root.submitPassword(password)
++      return "initiated"
++    }
++
++    function unlockStatus(): string {
++      return root.lastRemoteAuthResult
++    }
++
+     function isLocked(): string {
+       return root.currentlyLocked() ? "true" : "false"
+     }

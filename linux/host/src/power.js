@@ -1,7 +1,67 @@
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import { dbManager } from './db.js';
 import { notifier } from './notifier.js';
+
+export function getOmarchySocketPath() {
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid ? process.getuid() : 1000}`;
+  if (fs.existsSync(runtimeDir)) {
+    try {
+      const files = fs.readdirSync(runtimeDir);
+      const sockFile = files.find(f => f.startsWith('omarchy-shell-') && f.endsWith('.sock'));
+      if (sockFile) {
+        return `${runtimeDir}/${sockFile}`;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+export function sendOmarchyIpc(target, method, args = [], timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const socketPath = getOmarchySocketPath();
+    if (!socketPath) {
+      return reject(new Error('Omarchy shell socket not found'));
+    }
+
+    const payload = [target, method, ...args].join('\x1f') + '\x1e';
+    let response = '';
+    const socket = net.createConnection(socketPath, () => {
+      socket.write(payload);
+    });
+
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('Omarchy shell IPC timeout'));
+    }, timeoutMs);
+
+    socket.on('data', chunk => {
+      response += chunk.toString('utf8');
+      if (response.includes('\x1e')) {
+        clearTimeout(timer);
+        socket.end();
+      }
+    });
+
+    socket.on('end', () => {
+      clearTimeout(timer);
+      if (response.startsWith('OK\x1f')) {
+        const out = response.slice(3).replace(/\x1e.*$/, '');
+        resolve(out);
+      } else if (response.startsWith('SKIP')) {
+        reject(new Error('Target or function not found in Omarchy shell'));
+      } else {
+        resolve(response.replace(/\x1e.*$/, ''));
+      }
+    });
+
+    socket.on('error', err => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
 
 export class PowerManager {
   async lockSession() {
@@ -97,6 +157,81 @@ export class PowerManager {
     }
 
     return { locked: null, state: 'UNKNOWN' };
+  }
+
+  async unlockSession(password) {
+    if (!password || typeof password !== 'string' || password.length === 0) {
+      return { success: false, status: 'INVALID_PASSWORD', message: 'Password cannot be empty' };
+    }
+
+    // 1. Verify lock status first
+    const currentLock = this.getLockStatus();
+    if (currentLock.locked === false) {
+      return { success: false, status: 'NOT_LOCKED', message: 'Laptop is not currently locked' };
+    }
+
+    let initResult = null;
+    try {
+      initResult = await sendOmarchyIpc('lock', 'unlockWithPassword', [password]);
+    } catch (err) {
+      // If direct socket fails, try omarchy-shell fallback
+      try {
+        initResult = execFileSync('omarchy-shell', ['lock', 'unlockWithPassword', password], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 2000
+        }).trim();
+      } catch (fallbackErr) {
+        return { success: false, status: 'HOST_UNAVAILABLE', message: `Omarchy shell lock IPC failed: ${err.message}` };
+      }
+    }
+
+    if (initResult === 'not-locked') {
+      return { success: false, status: 'NOT_LOCKED', message: 'Laptop is not currently locked' };
+    }
+    if (initResult === 'empty-password') {
+      return { success: false, status: 'INVALID_PASSWORD', message: 'Password cannot be empty' };
+    }
+    if (initResult === 'busy') {
+      return { success: false, status: 'BUSY', message: 'Authentication attempt already in progress' };
+    }
+    if (initResult !== 'initiated') {
+      return { success: false, status: 'HOST_UNAVAILABLE', message: `Unexpected lock IPC response: ${initResult}` };
+    }
+
+    // 2. Poll unlock status for PAM result (up to 4 seconds)
+    const startTime = Date.now();
+    const timeoutMs = 4000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise(r => setTimeout(r, 120));
+      try {
+        const authStatus = await sendOmarchyIpc('lock', 'unlockStatus', [], 1000);
+        if (authStatus === 'success') {
+          notifier.notify('Regnant', 'Workstation session unlocked');
+          return { success: true, status: 'UNLOCKED', message: 'Workstation session unlocked successfully' };
+        }
+        if (authStatus === 'failure') {
+          return { success: false, status: 'INVALID_PASSWORD', message: 'Authentication failed: invalid password' };
+        }
+      } catch {
+        // Check lock status directly as fallback
+        const pollStatus = this.getLockStatus();
+        if (pollStatus.locked === false) {
+          notifier.notify('Regnant', 'Workstation session unlocked');
+          return { success: true, status: 'UNLOCKED', message: 'Workstation session unlocked successfully' };
+        }
+      }
+    }
+
+    // Final check
+    const finalStatus = this.getLockStatus();
+    if (finalStatus.locked === false) {
+      notifier.notify('Regnant', 'Workstation session unlocked');
+      return { success: true, status: 'UNLOCKED', message: 'Workstation session unlocked successfully' };
+    }
+
+    return { success: false, status: 'INVALID_PASSWORD', message: 'Authentication timed out or failed' };
   }
 
   async suspendSystem() {

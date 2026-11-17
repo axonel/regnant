@@ -381,7 +381,7 @@ class RegnantClient(
                 return Result.success(parsed)
             } else {
                 val errorJson = try { gson.fromJson(responseBody, JsonObject::class.java) } catch (e: Exception) { null }
-                val errorMsg = errorJson?.get("error")?.asString ?: "Request failed: HTTP ${response.code}"
+                val errorMsg = errorJson?.get("message")?.asString ?: errorJson?.get("error")?.asString ?: "Request failed: HTTP ${response.code}"
                 return Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
@@ -544,6 +544,25 @@ class RegnantClient(
             Result.success(true)
         } else {
             Result.failure(res.exceptionOrNull() ?: Exception("Lock failed"))
+        }
+    }
+
+    suspend fun unlockWorkstation(password: String): Result<UnlockResponse> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("password", password) }
+        val res = executeAuthRequest("/api/v1/power/unlock", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) {
+            val json = res.getOrNull()
+            val success = json?.get("success")?.asBoolean ?: false
+            val status = json?.get("status")?.asString ?: if (success) "UNLOCKED" else "INVALID_PASSWORD"
+            val message = json?.get("message")?.asString ?: ""
+            if (success) {
+                _lockState.value = LockState(locked = false, state = "UNLOCKED", timestamp = System.currentTimeMillis())
+            }
+            Result.success(UnlockResponse(success = success, status = status, message = message))
+        } else {
+            val err = res.exceptionOrNull()
+            val msg = err?.message ?: "Unlock request failed"
+            Result.failure(Exception(msg))
         }
     }
 
