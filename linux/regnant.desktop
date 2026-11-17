@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Regnant
+GenericName=Mobile Control Plane
+Comment=Personal mobile control plane for Omarchy Linux
+Exec=/home/roonakyadav/.local/bin/regnant-desktop
+Icon=regnant
+Terminal=false
+Categories=Utility;System;
+Keywords=remote;control;android;mobile;host;regnant;
+StartupWMClass=regnant-desktop

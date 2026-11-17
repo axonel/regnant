@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Regnant — Linux Desktop Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header Bar -->
+    <header class="header">
+      <div class="header-brand">
+        <img src="../../../assets/icon-48.png" alt="Regnant Icon" class="brand-icon">
+        <div>
+          <h1 class="brand-title">REGNANT</h1>
+          <div class="brand-sub">Personal Mobile Control Plane &bull; Omarchy Linux</div>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator" id="hostStatusDot"></span>
+        <span class="status-label" id="hostStatusText">CONNECTING...</span>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="content-grid">
+      <!-- Left Column: Pairing & Devices -->
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">DEVICE PAIRING</h2>
+          <button class="btn btn-secondary btn-sm" id="btnGenCode">Generate Code</button>
+        </div>
+
+        <div class="pairing-box" id="pairingBox">
+          <div class="pairing-code" id="pairingCodeDisplay">------</div>
+          <div class="pairing-timer" id="pairingTimerDisplay">Click "Generate Code" to start</div>
+          <p class="pairing-instructions">
+            Enter this temporary code in the Regnant Android app. Codes expire in 5 minutes and are single-use.
+          </p>
+        </div>
+
+        <div class="panel-header" style="margin-top: 24px;">
+          <h2 class="panel-title">PAIRED MOBILE DEVICES</h2>
+        </div>
+        <div class="devices-list" id="devicesList">
+          <div class="empty-state">No paired devices yet</div>
+        </div>
+      </section>
+
+      <!-- Right Column: Host & Execution History -->
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">SUPPORTED APPLICATIONS</h2>
+        </div>
+        <div class="apps-grid" id="appsGrid">
+          <div class="app-card">
+            <span class="app-name">Terminal</span>
+            <span class="app-exec" id="appTerminal">foot</span>
+          </div>
+          <div class="app-card">
+            <span class="app-name">Browser</span>
+            <span class="app-exec" id="appBrave">brave</span>
+          </div>
+          <div class="app-card">
+            <span class="app-name">File Manager</span>
+            <span class="app-exec" id="appFiles">nautilus</span>
+          </div>
+          <div class="app-card">
+            <span class="app-name">Calculator</span>
+            <span class="app-exec" id="appCalc">omacalc</span>
+          </div>
+        </div>
+
+        <div class="panel-header" style="margin-top: 24px;">
+          <h2 class="panel-title">RECENT COMMANDS</h2>
+          <span class="badge" id="historyCount">0 entries</span>
+        </div>
+        <div class="history-list" id="historyList">
+          <div class="empty-state">No commands executed yet</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Footer Status -->
+    <footer class="footer">
+      <div class="footer-meta">
+        <span>Port: <strong id="metaPort">8765</strong></span>
+        <span>Protocol: <strong id="metaVersion">1.0.0</strong></span>
+        <span>TLS Fingerprint: <code id="metaFingerprint">Calculating...</code></span>
+      </div>
+      <button class="btn btn-sm btn-outline" id="btnRestartHost">Refresh Service</button>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

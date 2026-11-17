@@ -1,0 +1,12 @@
+{
+  "name": "regnant-desktop",
+  "version": "1.0.0",
+  "description": "Regnant Linux Desktop Control Plane",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron42 src/main.js --ozone-platform=wayland"
+  },
+  "author": "Regnant Team",
+  "license": "ISC"
+}

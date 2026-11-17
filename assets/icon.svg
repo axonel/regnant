@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="104" fill="#0C0F14"/>
+  <!-- Subtly recessed inner border in Juniper -->
+  <rect x="24" y="24" width="464" height="464" rx="80" fill="none" stroke="#343723" stroke-width="4"/>
+  <!-- Command Vector / Sovereign Crown Silhouette -->
+  <!-- Left Wing -->
+  <polygon points="120,340 120,200 176,260 216,340" fill="#898861"/>
+  <!-- Right Wing -->
+  <polygon points="392,340 392,200 336,260 296,340" fill="#898861"/>
+  <!-- Central Crown Spire / Command Apex -->
+  <polygon points="256,120 316,280 256,330 196,280" fill="#EFE9D7"/>
+  <!-- Anchor Base Bar -->
+  <rect x="140" y="360" width="232" height="28" rx="6" fill="#343723"/>
+  <!-- Focal Core Indicator in Coral -->
+  <rect x="244" y="366" width="24" height="16" rx="4" fill="#7D2826"/>
+  <!-- Precision Notch Accent -->
+  <polygon points="256,170 270,206 242,206" fill="#0C0F14"/>
+</svg>
