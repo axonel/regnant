@@ -341,3 +341,9 @@ data class LockState(
     val timestamp: Long = 0L
 )
 
+data class UnlockResponse(
+    val success: Boolean = false,
+    val status: String = "INVALID_PASSWORD",
+    val message: String = ""
+)
+

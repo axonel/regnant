@@ -81,3 +81,26 @@ test('PowerManager — lock status reporting', async () => {
   assert.ok('state' in status);
   assert.ok(['LOCKED', 'UNLOCKED', 'UNKNOWN'].includes(status.state));
 });
+
+test('PowerManager — unlockSession validation and safety checks', async () => {
+  const { PowerManager } = await import('../src/power.js');
+  const power = new PowerManager();
+
+  // Empty password validation
+  const emptyRes = await power.unlockSession('');
+  assert.equal(emptyRes.success, false);
+  assert.equal(emptyRes.status, 'INVALID_PASSWORD');
+
+  const nullRes = await power.unlockSession(null);
+  assert.equal(nullRes.success, false);
+  assert.equal(nullRes.status, 'INVALID_PASSWORD');
+
+  // When workstation is currently unlocked, attempting unlock yields NOT_LOCKED
+  const status = power.getLockStatus();
+  if (status.locked === false) {
+    const unlockedRes = await power.unlockSession('dummy-pass');
+    assert.equal(unlockedRes.success, false);
+    assert.equal(unlockedRes.status, 'NOT_LOCKED');
+  }
+});
+

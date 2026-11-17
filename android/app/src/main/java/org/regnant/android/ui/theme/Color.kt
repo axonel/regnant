@@ -15,6 +15,7 @@ val SurfaceBorder = Color(0xFF262C38)
 val TextMuted = Color(0xFFA5A395)
 val StatusGreen = Color(0xFF4E8E5F)
 val StatusRed = Color(0xFF9E3A37)
+val StatusAmber = Color(0xFFD49B35)
 
 // Semantic aliases matching Sovereign Command palette
 val TextPrimary = Candle

@@ -1,4 +1,4 @@
-# REGNANT (v1.2.1)
+# REGNANT (v1.2.2)
 
 > Personal mobile control plane for Omarchy Linux workstation.
 
@@ -33,11 +33,20 @@ Regnant connects an Android smartphone directly to a Linux laptop over the local
 
 ---
 
+## What's New in v1.2.2
+
+- **Remote Laptop Unlock via Omarchy PAM**: Authenticate and unlock the Linux workstation remotely from Android using the actual Linux user login password. Integrates with Omarchy's existing `/etc/pam.d/omarchy-lock-password` PAM pipeline via user-space Quickshell plugin IPC.
+- **Stateful Lock & Unlock UI**: Replaced single lock button with dynamic dual controls on the Android Home screen. When locked, displays a high-visibility `[🔒 LOCKED]` badge alongside an `[🔓 Unlock Laptop]` button.
+- **Masked Password Dialog & Instant Wiping**: Clean modal dialog with `PasswordVisualTransformation`, eye icon toggle, and immediate memory erasure on submit (`password = ""`). Zero persistence in SQLite, SharedPreferences, or logs.
+- **Direct UNIX Domain Socket Transport**: Communication between the Regnant daemon and Omarchy Quickshell occurs over `/run/user/1000/omarchy-shell-*.sock`, avoiding command-line argument inspection (`ps aux`).
+- **Comprehensive State Feedback**: Real-time validation and feedback: `UNLOCKING` (PAM verification in progress), `UNLOCKED` (success), `INVALID PASSWORD` (PAM authentication failure), and `HOST UNAVAILABLE`.
+
+---
+
 ## What's New in v1.2.1
 
 - **Animated Hyprland Workspace Selector**: Prominently placed on Android Home screen (`1 — 2 — 3 — 4 — 5`) with smooth spring-based sliding indicator, supporting touch taps and horizontal drag gestures. Event-driven bi-directional synchronization directly bound to Hyprland's UNIX domain event socket (`.socket2.sock`) and Omarchy Lua dispatchers (`o.workspaces.focus`). Out-of-range workspaces (e.g. > 5) are cleanly flagged without falsely highlighting slot 5.
 - **Dedicated "Lock Laptop" Control**: Replaced ambiguous lock controls with a prominent, high-contrast "Lock Laptop" button on Android. Tapping opens an explicit confirmation dialog identifying the target machine (`Lock electron (Omarchy)?`) and stating the physical password/fingerprint requirement. Executes Omarchy's native `/usr/share/omarchy/bin/omarchy-system-lock` and reports `"Laptop locked"` status.
-- **Strict Security Boundary**: Regnant never stores, transmits, or accepts login passwords. Remote locking is strictly one-way; unlocking always requires physical entry on the workstation.
 
 ---
 
@@ -115,6 +124,7 @@ regnant/
     ├── file-transfers.md            # File browser, sandboxing & chunked transfer protocol
     ├── permissions.md               # Capability matrix & consequential approval workflow
     ├── security.md                  # Cryptographic model, Keystore storage & token lifecycle
+    ├── remote-unlock.md             # Remote Omarchy PAM unlock, UNIX socket IPC & security model
     └── testing.md                   # Full test results, physical device verification & evidence
 ```
 

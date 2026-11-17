@@ -567,7 +567,31 @@ export class HostServer {
       }
       try {
         const result = await powerManager.lockSession();
+        this.broadcastLockState();
         return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/power/unlock') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.POWER_CONTROLS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: power controls are restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const password = body.password;
+        if (!password || typeof password !== 'string' || password.length === 0) {
+          return this.sendJson(res, 400, { error: 'Non-empty password is required' });
+        }
+        const result = await powerManager.unlockSession(password);
+        this.broadcastLockState();
+        if (result.success) {
+          return this.sendJson(res, 200, result);
+        } else {
+          const statusCode = result.status === 'INVALID_PASSWORD' ? 401 : (result.status === 'NOT_LOCKED' ? 409 : 400);
+          return this.sendJson(res, statusCode, result);
+        }
       } catch (err) {
         return this.sendJson(res, 500, { error: err.message });
       }
@@ -1693,6 +1717,20 @@ export class HostServer {
     for (const ws of this.activeClients.keys()) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
+      }
+    }
+  }
+
+  broadcastLockState(lockStatus = null) {
+    const status = lockStatus || powerManager.getLockStatus();
+    const payload = JSON.stringify({
+      type: WS_EVENTS.LOCK_STATE,
+      ...status,
+      timestamp: Date.now()
+    });
+    for (const ws of this.activeClients.keys()) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); } catch {}
       }
     }
   }

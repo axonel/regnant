@@ -24,6 +24,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -64,17 +67,24 @@ fun HomeScreen(
 
     var metrics by remember { mutableStateOf<HostMetrics?>(null) }
     var showLockDialog by remember { mutableStateOf(false) }
+    var showUnlockDialog by remember { mutableStateOf(false) }
 
     val workspaceState by client.workspaceState.collectAsState()
     val activeWorkspaceId = workspaceState?.workspaceId ?: 1
 
-    // Lightweight telemetry polling on home screen
+    val lockState by client.lockState.collectAsState()
+    val isLocked = lockState?.locked == true || lockState?.state == "LOCKED"
+
+    // Lightweight telemetry and lock status polling on home screen
     LaunchedEffect(connectionStatus) {
         if (connectionStatus == ConnectionStatus.CONNECTED) {
+            client.getActiveWorkspace()
+            client.getLockStatus()
             while (isActive) {
                 val res = client.getMetrics()
                 if (res.isSuccess) metrics = res.getOrNull()
-                delay(8000) // Poll every 8s on home screen
+                client.getLockStatus()
+                delay(6000) // Poll every 6s on home screen
             }
         }
     }
@@ -174,33 +184,80 @@ fun HomeScreen(
                         )
                     }
 
-                    // Replaced former small icon with dedicated "Lock Laptop" button
-                    OutlinedButton(
-                        onClick = { showLockDialog = true },
-                        enabled = isConnected,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = SurfaceDark,
-                            contentColor = Coral,
-                            disabledContentColor = TextMuted
-                        ),
-                        border = BorderStroke(1.dp, if (isConnected) Coral.copy(alpha = 0.6f) else SurfaceBorder),
-                        shape = RoundedCornerShape(6.dp)
+                    // Dual Laptop Lock & Unlock Controls
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = if (isConnected) Coral else TextMuted,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Lock Laptop",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isConnected) Candle else TextMuted
-                        )
+                        if (isLocked) {
+                            Surface(
+                                color = Coral.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, Coral.copy(alpha = 0.6f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Lock, contentDescription = null, tint = Coral, modifier = Modifier.size(11.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("LOCKED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Coral)
+                                }
+                            }
+
+                            Button(
+                                onClick = { showUnlockDialog = true },
+                                enabled = isConnected,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = StatusGreen,
+                                    contentColor = MainBackground
+                                ),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LockOpen,
+                                    contentDescription = null,
+                                    tint = MainBackground,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Unlock Laptop",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { showLockDialog = true },
+                                enabled = isConnected,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = SurfaceDark,
+                                    contentColor = Coral,
+                                    disabledContentColor = TextMuted
+                                ),
+                                border = BorderStroke(1.dp, if (isConnected) Coral.copy(alpha = 0.6f) else SurfaceBorder),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = if (isConnected) Coral else TextMuted,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Lock Laptop",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isConnected) Candle else TextMuted
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -305,7 +362,7 @@ fun HomeScreen(
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Unlocking requires physical entry of your password or fingerprint directly on the computer. Regnant cannot unlock your workstation remotely.",
+                        text = "You can unlock your workstation using your Linux login password remotely from Regnant or directly on the computer.",
                         color = TextMuted,
                         fontSize = 13.sp,
                         lineHeight = 18.sp
@@ -340,6 +397,33 @@ fun HomeScreen(
                     onClick = { showLockDialog = false }
                 ) {
                     Text("Cancel", color = TextMuted)
+                }
+            }
+        )
+    }
+
+    if (showUnlockDialog) {
+        val laptopName = pairedHost?.hostName ?: "Linux Laptop"
+        UnlockPasswordDialog(
+            laptopName = laptopName,
+            onDismiss = { showUnlockDialog = false },
+            onUnlock = { pwd ->
+                val res = client.unlockWorkstation(pwd)
+                if (res.isSuccess) {
+                    val data = res.getOrNull()
+                    if (data?.success == true) {
+                        Toast.makeText(context, "Workstation unlocked", Toast.LENGTH_SHORT).show()
+                        UnlockResultState.Success
+                    } else {
+                        UnlockResultState.InvalidPassword(data?.message ?: "Invalid password")
+                    }
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: ""
+                    if (err.contains("invalid password", ignoreCase = true) || err.contains("401")) {
+                        UnlockResultState.InvalidPassword("Authentication failed: invalid password")
+                    } else {
+                        UnlockResultState.HostUnavailable(err.ifEmpty { "Host connection error" })
+                    }
                 }
             }
         )
@@ -626,5 +710,248 @@ fun ControlMatrixSection(
             }
         }
     }
+}
+
+@Composable
+fun UnlockPasswordDialog(
+    laptopName: String,
+    onDismiss: () -> Unit,
+    onUnlock: suspend (String) -> UnlockResultState
+) {
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var unlockState by remember { mutableStateOf<UnlockResultState>(UnlockResultState.Idle) }
+    val coroutineScope = rememberCoroutineScope()
+    val isUnlocking = unlockState is UnlockResultState.Unlocking
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isUnlocking) {
+                password = ""
+                onDismiss()
+            }
+        },
+        containerColor = SurfaceCard,
+        shape = RoundedCornerShape(12.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.LockOpen,
+                    contentDescription = null,
+                    tint = Coral,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Unlock $laptopName",
+                    color = Candle,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Enter your Linux login password to authenticate and unlock your Omarchy workstation via PAM.",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp
+                )
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = {
+                        password = it
+                        if (unlockState !is UnlockResultState.Idle && unlockState !is UnlockResultState.Unlocking) {
+                            unlockState = UnlockResultState.Idle
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Linux Password", color = TextMuted, fontSize = 12.sp) },
+                    placeholder = { Text("Enter login password", color = TextMuted.copy(alpha = 0.5f), fontSize = 13.sp) },
+                    singleLine = true,
+                    enabled = !isUnlocking,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Text,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (password.isNotEmpty() && !isUnlocking) {
+                                coroutineScope.launch {
+                                    val submitted = password
+                                    password = ""
+                                    unlockState = UnlockResultState.Unlocking
+                                    val result = onUnlock(submitted)
+                                    unlockState = result
+                                    if (result is UnlockResultState.Success) {
+                                        delay(800)
+                                        onDismiss()
+                                    }
+                                }
+                            }
+                        }
+                    ),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                                tint = TextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Candle,
+                        unfocusedTextColor = Candle,
+                        focusedBorderColor = Coral,
+                        unfocusedBorderColor = SurfaceBorder,
+                        cursorColor = Coral
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                when (val state = unlockState) {
+                    is UnlockResultState.Unlocking -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SurfaceDark, RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                color = Coral,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "UNLOCKING — Verifying PAM credentials...",
+                                color = Candle,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    is UnlockResultState.Success -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(StatusGreen.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .border(1.dp, StatusGreen.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = StatusGreen, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "UNLOCKED — Workstation unlocked",
+                                color = StatusGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    is UnlockResultState.InvalidPassword -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(StatusRed.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .border(1.dp, StatusRed.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Error, contentDescription = null, tint = StatusRed, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "INVALID PASSWORD — Authentication failed",
+                                color = StatusRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    is UnlockResultState.HostUnavailable -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(StatusAmber.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .border(1.dp, StatusAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = StatusAmber, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "HOST UNAVAILABLE — ${state.message}",
+                                color = StatusAmber,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (password.isNotEmpty() && !isUnlocking) {
+                        coroutineScope.launch {
+                            val submitted = password
+                            password = ""
+                            unlockState = UnlockResultState.Unlocking
+                            val result = onUnlock(submitted)
+                            unlockState = result
+                            if (result is UnlockResultState.Success) {
+                                delay(800)
+                                onDismiss()
+                            }
+                        }
+                    }
+                },
+                enabled = password.isNotEmpty() && !isUnlocking,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Coral,
+                    disabledContainerColor = SurfaceDark
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = if (isUnlocking) "Unlocking..." else "Unlock",
+                    color = if (password.isNotEmpty() && !isUnlocking) Candle else TextMuted,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    password = ""
+                    onDismiss()
+                },
+                enabled = !isUnlocking
+            ) {
+                Text("Cancel", color = TextMuted)
+            }
+        }
+    )
+}
+
+sealed class UnlockResultState {
+    object Idle : UnlockResultState()
+    object Unlocking : UnlockResultState()
+    object Success : UnlockResultState()
+    data class InvalidPassword(val message: String = "Authentication failed: invalid password") : UnlockResultState()
+    data class HostUnavailable(val message: String = "Host service unavailable") : UnlockResultState()
 }
 
