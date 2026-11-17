@@ -50,6 +50,12 @@ class RegnantClient(
     private val _metricsEvents = MutableStateFlow<HostMetrics?>(null)
     val metricsEvents: StateFlow<HostMetrics?> = _metricsEvents.asStateFlow()
 
+    private val _terminalDataEvents = MutableSharedFlow<Pair<String, String>>()
+    val terminalDataEvents: SharedFlow<Pair<String, String>> = _terminalDataEvents.asSharedFlow()
+
+    private val _agentEvents = MutableSharedFlow<JsonObject>()
+    val agentEvents: SharedFlow<JsonObject> = _agentEvents.asSharedFlow()
+
     private var activeWebSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
@@ -305,6 +311,12 @@ class RegnantClient(
                 val data = json.getAsJsonObject("data") ?: return
                 val metrics = gson.fromJson(data, HostMetrics::class.java)
                 _metricsEvents.value = metrics
+            } else if (type == "TERM_DATA") {
+                val sId = json.get("sessionId")?.asString ?: ""
+                val chunk = json.get("data")?.asString ?: ""
+                scope.launch { _terminalDataEvents.emit(Pair(sId, chunk)) }
+            } else if (type == "AGENT_OUTPUT" || type == "AGENT_STATUS" || type == "AGENT_STARTED" || type == "AGENT_ERROR") {
+                scope.launch { _agentEvents.emit(json) }
             }
         } catch (e: Exception) {
             Log.e(tag, "Error parsing incoming WS message: ${e.message}")
@@ -538,5 +550,415 @@ class RegnantClient(
         val payload = JsonObject().apply { addProperty("query", query) }
         val res = executeAuthRequest("/api/v1/web/search", "POST", payload.toString(), JsonObject::class.java)
         if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Search failed"))
+    }
+
+    // --- v1.2 API Extensions ---
+
+    fun executeAuthRequestBytes(path: String): Result<ByteArray> {
+        val host = securityStore.getPairedHost() ?: return Result.failure(Exception("No paired host"))
+        val token = securityStore.getAuthToken() ?: return Result.failure(Exception("No auth token"))
+        val fingerprint = securityStore.getCertificateFingerprint()
+        val client = buildPinnedHttpClient(fingerprint, host.ip)
+
+        val url = "https://workstation.regnant.local:${host.port}$path"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $token")
+            .get()
+            .build()
+
+        return try {
+            val response = client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bytes = response.body?.bytes() ?: ByteArray(0)
+                Result.success(bytes)
+            } else {
+                Result.failure(Exception("HTTP ${response.code}: ${response.message}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun sendWebSocketMessage(json: JsonObject): Boolean {
+        val ws = activeWebSocket ?: return false
+        return ws.send(json.toString())
+    }
+
+    // Agents
+    suspend fun getAgents(): Result<List<AgentItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/agents", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("agents") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<AgentItem>()
+            arr.forEach { list.add(gson.fromJson(it, AgentItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get agents"))
+        }
+    }
+
+    suspend fun startAgent(agentId: String, workspacePath: String, prompt: String): Result<JsonObject> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply {
+            addProperty("agentId", agentId)
+            addProperty("workspacePath", workspacePath)
+            addProperty("prompt", prompt)
+        }
+        executeAuthRequest("/api/v1/agents/start", "POST", payload.toString(), JsonObject::class.java)
+    }
+
+    suspend fun sendAgentInput(sessionId: String, input: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply {
+            addProperty("sessionId", sessionId)
+            addProperty("input", input)
+        }
+        val res = executeAuthRequest("/api/v1/agents/input", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Failed to send input"))
+    }
+
+    suspend fun cancelAgent(sessionId: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("sessionId", sessionId) }
+        val res = executeAuthRequest("/api/v1/agents/cancel", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Failed to cancel agent"))
+    }
+
+    suspend fun getAgentSessions(): Result<List<AgentSessionItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/agents/sessions", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("sessions") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<AgentSessionItem>()
+            arr.forEach { list.add(gson.fromJson(it, AgentSessionItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get sessions"))
+        }
+    }
+
+    // Terminal
+    suspend fun createTerminal(cwd: String?, cols: Int = 80, rows: Int = 24, title: String = "Terminal"): Result<TerminalSessionItem> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply {
+            if (cwd != null) addProperty("cwd", cwd)
+            addProperty("cols", cols)
+            addProperty("rows", rows)
+            addProperty("title", title)
+        }
+        executeAuthRequest("/api/v1/terminal/create", "POST", payload.toString(), TerminalSessionItem::class.java)
+    }
+
+    suspend fun listTerminals(): Result<List<TerminalSessionItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/terminal/list", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("sessions") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<TerminalSessionItem>()
+            arr.forEach { list.add(gson.fromJson(it, TerminalSessionItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to list terminals"))
+        }
+    }
+
+    suspend fun getTerminalBuffer(sessionId: String): Result<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/terminal/buffer?sessionId=$sessionId", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            Result.success(res.getOrNull()?.get("buffer")?.asString ?: "")
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get terminal buffer"))
+        }
+    }
+
+    suspend fun closeTerminal(sessionId: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("sessionId", sessionId) }
+        val res = executeAuthRequest("/api/v1/terminal/close", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Failed to close terminal"))
+    }
+
+    fun sendTerminalInput(sessionId: String, data: String): Boolean {
+        val msg = JsonObject().apply {
+            addProperty("type", "TERM_INPUT")
+            addProperty("sessionId", sessionId)
+            addProperty("data", data)
+        }
+        val sent = sendWebSocketMessage(msg)
+        if (!sent) {
+            CoroutineScope(Dispatchers.IO).launch {
+                executeAuthRequest("/api/v1/terminal/input", "POST", msg.toString(), JsonObject::class.java)
+            }
+        }
+        return true
+    }
+
+    fun resizeTerminal(sessionId: String, cols: Int, rows: Int): Boolean {
+        val msg = JsonObject().apply {
+            addProperty("type", "TERM_RESIZE")
+            addProperty("sessionId", sessionId)
+            addProperty("cols", cols)
+            addProperty("rows", rows)
+        }
+        return sendWebSocketMessage(msg)
+    }
+
+    // Git & GitHub
+    suspend fun getGitStatus(path: String? = null): Result<GitStatusItem> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val query = if (path != null) "?path=" + java.net.URLEncoder.encode(path, "UTF-8") else ""
+        executeAuthRequest("/api/v1/git/status$query", "GET", null, GitStatusItem::class.java)
+    }
+
+    suspend fun getGitBranches(path: String? = null): Result<List<GitBranchItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val query = if (path != null) "?path=" + java.net.URLEncoder.encode(path, "UTF-8") else ""
+        val res = executeAuthRequest("/api/v1/git/branches$query", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("branches") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<GitBranchItem>()
+            arr.forEach { list.add(gson.fromJson(it, GitBranchItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get git branches"))
+        }
+    }
+
+    suspend fun getGitCommits(path: String? = null, limit: Int = 20): Result<List<GitCommitItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val p = if (path != null) "&path=" + java.net.URLEncoder.encode(path, "UTF-8") else ""
+        val res = executeAuthRequest("/api/v1/git/commits?limit=$limit$p", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("commits") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<GitCommitItem>()
+            arr.forEach { list.add(gson.fromJson(it, GitCommitItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get git commits"))
+        }
+    }
+
+    suspend fun getGitDiff(path: String? = null, sha: String? = null): Result<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        var query = if (path != null) "?path=" + java.net.URLEncoder.encode(path, "UTF-8") else "?"
+        if (sha != null) query += "&sha=$sha"
+        val res = executeAuthRequest("/api/v1/git/diff$query", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            Result.success(res.getOrNull()?.get("diff")?.asString ?: "")
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get git diff"))
+        }
+    }
+
+    suspend fun getGitHubAuth(): Result<JsonObject> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/github/auth", "GET", null, JsonObject::class.java)
+    }
+
+    suspend fun getGitHubPRs(path: String? = null, limit: Int = 15): Result<List<GitHubPRItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val p = if (path != null) "&path=" + java.net.URLEncoder.encode(path, "UTF-8") else ""
+        val res = executeAuthRequest("/api/v1/github/prs?limit=$limit$p", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("pullRequests") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<GitHubPRItem>()
+            arr.forEach { list.add(gson.fromJson(it, GitHubPRItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get GitHub PRs"))
+        }
+    }
+
+    suspend fun getGitHubRuns(path: String? = null, limit: Int = 15): Result<List<GitHubRunItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val p = if (path != null) "&path=" + java.net.URLEncoder.encode(path, "UTF-8") else ""
+        val res = executeAuthRequest("/api/v1/github/runs?limit=$limit$p", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("runs") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<GitHubRunItem>()
+            arr.forEach { list.add(gson.fromJson(it, GitHubRunItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get GitHub runs"))
+        }
+    }
+
+    // Hyprland
+    suspend fun getHyprWindows(): Result<List<HyprWindowItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/hypr/windows", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("windows") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<HyprWindowItem>()
+            arr.forEach { list.add(gson.fromJson(it, HyprWindowItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get Hyprland windows"))
+        }
+    }
+
+    suspend fun getHyprWorkspaces(): Result<List<HyprWorkspaceItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/hypr/workspaces", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("workspaces") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<HyprWorkspaceItem>()
+            arr.forEach { list.add(gson.fromJson(it, HyprWorkspaceItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get Hyprland workspaces"))
+        }
+    }
+
+    suspend fun dispatchHypr(action: String, address: String? = null, workspaceId: Int? = null): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply {
+            addProperty("action", action)
+            if (address != null) addProperty("address", address)
+            if (workspaceId != null) addProperty("workspaceId", workspaceId)
+        }
+        val res = executeAuthRequest("/api/v1/hypr/dispatch", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Dispatch failed"))
+    }
+
+    // Browser
+    suspend fun getBrowserTabs(): Result<List<BrowserTabItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/browser/tabs", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("tabs") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<BrowserTabItem>()
+            arr.forEach { list.add(gson.fromJson(it, BrowserTabItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get browser tabs"))
+        }
+    }
+
+    suspend fun activateBrowserTab(tabId: Int, windowId: Int? = null): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply {
+            addProperty("tabId", tabId)
+            if (windowId != null) addProperty("windowId", windowId)
+        }
+        val res = executeAuthRequest("/api/v1/browser/activate", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Activate failed"))
+    }
+
+    suspend fun closeBrowserTab(tabId: Int): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("tabId", tabId) }
+        val res = executeAuthRequest("/api/v1/browser/close", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Close tab failed"))
+    }
+
+    suspend fun openBrowserTab(url: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("url", url) }
+        val res = executeAuthRequest("/api/v1/browser/open", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Open tab failed"))
+    }
+
+    suspend fun inspectBrowserPage(): Result<JsonObject> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/browser/inspect", "GET", null, JsonObject::class.java)
+    }
+
+    // Desktop Peek
+    suspend fun getDesktopPeekJpeg(quality: Int = 70): Result<ByteArray> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequestBytes("/api/v1/desktop/peek?q=$quality")
+    }
+
+    // Audio & Media
+    suspend fun getAudioState(): Result<AudioState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/audio", "GET", null, AudioState::class.java)
+    }
+
+    suspend fun setAudioVolume(percent: Int): Result<AudioState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("percent", percent) }
+        executeAuthRequest("/api/v1/audio/volume", "POST", payload.toString(), AudioState::class.java)
+    }
+
+    suspend fun toggleAudioMute(): Result<AudioState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/audio/mute", "POST", "{}", AudioState::class.java)
+    }
+
+    suspend fun getMediaState(): Result<MediaState> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/media", "GET", null, MediaState::class.java)
+    }
+
+    suspend fun controlMedia(action: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("action", action) }
+        val res = executeAuthRequest("/api/v1/media/control", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Media control failed"))
+    }
+
+    // Downloads
+    suspend fun getDownloads(limit: Int = 20): Result<List<DownloadFileItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/downloads?limit=$limit", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("files") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<DownloadFileItem>()
+            arr.forEach { list.add(gson.fromJson(it, DownloadFileItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get downloads"))
+        }
+    }
+
+    // Search
+    suspend fun searchLaptop(query: String, limit: Int = 25): Result<List<SearchItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val q = java.net.URLEncoder.encode(query, "UTF-8")
+        val res = executeAuthRequest("/api/v1/search?q=$q&limit=$limit", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("results") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<SearchItem>()
+            arr.forEach { list.add(gson.fromJson(it, SearchItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to search laptop"))
+        }
+    }
+
+    suspend fun reindexLaptop(): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/search/reindex", "POST", "{}", JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Reindex failed"))
+    }
+
+    // Automations & Schedules
+    suspend fun getAutomations(): Result<List<AutomationRuleItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/automations", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("rules") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<AutomationRuleItem>()
+            arr.forEach { list.add(gson.fromJson(it, AutomationRuleItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get automations"))
+        }
+    }
+
+    suspend fun saveAutomation(rule: AutomationRuleItem): Result<AutomationRuleItem> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = gson.toJson(rule)
+        executeAuthRequest("/api/v1/automations/save", "POST", payload, AutomationRuleItem::class.java)
+    }
+
+    suspend fun deleteAutomation(id: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("id", id) }
+        val res = executeAuthRequest("/api/v1/automations/delete", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Delete automation failed"))
+    }
+
+    suspend fun getSchedules(): Result<List<ScheduleItem>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val res = executeAuthRequest("/api/v1/schedules", "GET", null, JsonObject::class.java)
+        if (res.isSuccess) {
+            val arr = res.getOrNull()?.getAsJsonArray("schedules") ?: return@withContext Result.success(emptyList())
+            val list = mutableListOf<ScheduleItem>()
+            arr.forEach { list.add(gson.fromJson(it, ScheduleItem::class.java)) }
+            Result.success(list)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Failed to get schedules"))
+        }
+    }
+
+    suspend fun saveSchedule(schedule: ScheduleItem): Result<ScheduleItem> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = gson.toJson(schedule)
+        executeAuthRequest("/api/v1/schedules/save", "POST", payload, ScheduleItem::class.java)
+    }
+
+    suspend fun deleteSchedule(id: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("id", id) }
+        val res = executeAuthRequest("/api/v1/schedules/delete", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Delete schedule failed"))
+    }
+
+    // Wake-on-LAN
+    suspend fun getWolStatus(): Result<WolStatusItem> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        executeAuthRequest("/api/v1/wol/status", "GET", null, WolStatusItem::class.java)
+    }
+
+    suspend fun wakeWorkstation(mac: String): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val payload = JsonObject().apply { addProperty("mac", mac) }
+        val res = executeAuthRequest("/api/v1/wol/wake", "POST", payload.toString(), JsonObject::class.java)
+        if (res.isSuccess) Result.success(true) else Result.failure(res.exceptionOrNull() ?: Exception("Wake workstation failed"))
     }
 }

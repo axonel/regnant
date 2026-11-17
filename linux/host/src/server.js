@@ -18,6 +18,19 @@ import { clipboardManager } from './clipboard.js';
 import { powerManager } from './power.js';
 import { appManager } from './appmanager.js';
 import { routineManager } from './routines.js';
+import { agentManager } from './agents/manager.js';
+import { terminalManager } from './terminal/manager.js';
+import { gitManager } from './git/git.js';
+import { githubManager } from './git/github.js';
+import { hyprlandManager } from './hyprland/manager.js';
+import { browserManager } from './browser/manager.js';
+import { desktopPeekManager } from './peek/manager.js';
+import { audioMediaManager } from './audio/manager.js';
+import { downloadManager } from './downloads/manager.js';
+import { searchManager } from './search/manager.js';
+import { automationEngine } from './automations/engine.js';
+import { scheduler } from './scheduler/scheduler.js';
+import { wakeOnLanManager } from './wol.js';
 import {
   ACTIONS,
   TARGETS,
@@ -53,13 +66,43 @@ export class HostServer {
       console.log(`[Regnant Host] Server listening securely on port ${port} (HTTPS/WSS, IPv4/IPv6 dual-stack)`);
       console.log(`[Regnant Host] Fingerprint: ${cryptoManager.certFingerprint}`);
       serviceDiscovery.start(port);
-      notifier.notify('Regnant', `Host service active on port ${port}`);
+      scheduler.start();
+      searchManager.reindex().catch(() => {});
+    });
+
+    // Broadcast terminal and agent streams to all active WebSockets
+    terminalManager.on('data', ({ sessionId, data }) => {
+      const payload = JSON.stringify({
+        type: 'TERM_DATA',
+        sessionId,
+        data
+      });
+      for (const ws of this.activeClients.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(payload); } catch {}
+        }
+      }
+    });
+
+    agentManager.on('output', ({ sessionId, chunk, raw }) => {
+      const payload = JSON.stringify({
+        type: 'AGENT_OUTPUT',
+        sessionId,
+        chunk,
+        raw
+      });
+      for (const ws of this.activeClients.keys()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(payload); } catch {}
+        }
+      }
     });
 
     this.setupHeartbeat();
   }
 
   stop() {
+    scheduler.stop();
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
@@ -125,6 +168,16 @@ export class HostServer {
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     });
     res.end(json);
+  }
+
+  sendJpeg(res, statusCode, buffer) {
+    res.writeHead(statusCode, {
+      'Content-Type': 'image/jpeg',
+      'Content-Length': buffer.length,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
+    res.end(buffer);
   }
 
   async parseBody(req) {
@@ -549,6 +602,496 @@ export class HostServer {
       }
     }
 
+    // --- v1.2 AI Agent Control Centre ---
+    if (req.method === 'GET' && pathname === '/api/v1/agents') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AI_AGENTS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: AI agents is restricted' });
+      }
+      try {
+        const agents = await agentManager.listAgents();
+        return this.sendJson(res, 200, { agents });
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/agents/start') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AI_AGENTS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: AI agents is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await agentManager.startSession({
+          agentId: body.agentId,
+          workspacePath: body.workspacePath,
+          prompt: body.prompt,
+          broadcastFn: (evt) => this.broadcast(evt)
+        });
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/agents/input') {
+      try {
+        const body = await this.parseBody(req);
+        const success = agentManager.sendInput(body.sessionId, body.input);
+        return this.sendJson(res, 200, { success });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/agents/cancel') {
+      try {
+        const body = await this.parseBody(req);
+        const success = agentManager.cancelSession(body.sessionId);
+        return this.sendJson(res, 200, { success });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/agents/sessions') {
+      const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 30;
+      return this.sendJson(res, 200, {
+        sessions: agentManager.listSessions(limit),
+        active: agentManager.getActiveSessions()
+      });
+    }
+
+    // --- v1.2 Persistent Remote Terminal ---
+    if (req.method === 'POST' && pathname === '/api/v1/terminal/create') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.TERMINAL_ACCESS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: terminal access is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const session = terminalManager.createSession({
+          cwd: body.cwd,
+          cols: body.cols || 80,
+          rows: body.rows || 24,
+          title: body.title || 'Terminal'
+        });
+        return this.sendJson(res, 200, {
+          sessionId: session.id,
+          pid: session.pid,
+          cwd: session.cwd,
+          cols: session.cols,
+          rows: session.rows
+        });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/terminal/list') {
+      return this.sendJson(res, 200, { sessions: terminalManager.listSessions() });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/terminal/buffer') {
+      const sessionId = parsedUrl.searchParams.get('sessionId');
+      return this.sendJson(res, 200, {
+        sessionId,
+        buffer: terminalManager.getBuffer(sessionId)
+      });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/terminal/input') {
+      try {
+        const body = await this.parseBody(req);
+        const success = terminalManager.writeInput(body.sessionId, body.data);
+        return this.sendJson(res, 200, { success });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/terminal/close') {
+      try {
+        const body = await this.parseBody(req);
+        const success = terminalManager.closeSession(body.sessionId);
+        return this.sendJson(res, 200, { success });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Git & GitHub Cockpit ---
+    const resolveDefaultRepo = (requestedPath) => {
+      if (requestedPath && fs.existsSync(requestedPath)) return requestedPath;
+      const regnantRepo = '/home/roonakyadav/Projects/regnant';
+      if (fs.existsSync(path.join(regnantRepo, '.git'))) return regnantRepo;
+      return process.cwd();
+    };
+
+    if (req.method === 'GET' && pathname === '/api/v1/git/status') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.GIT_GITHUB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: Git and GitHub is restricted' });
+      }
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        return this.sendJson(res, 200, gitManager.getStatus(repoPath));
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/git/branches') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.GIT_GITHUB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: Git and GitHub is restricted' });
+      }
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        return this.sendJson(res, 200, { branches: gitManager.getBranches(repoPath) });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/git/commits') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.GIT_GITHUB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: Git and GitHub is restricted' });
+      }
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 20;
+        return this.sendJson(res, 200, { commits: gitManager.getCommits(repoPath, limit) });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/git/diff') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.GIT_GITHUB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: Git and GitHub is restricted' });
+      }
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const sha = parsedUrl.searchParams.get('sha') || null;
+        return this.sendJson(res, 200, gitManager.getDiff(repoPath, sha));
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/github/auth') {
+      return this.sendJson(res, 200, githubManager.checkAuth());
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/github/prs') {
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 15;
+        return this.sendJson(res, 200, { pullRequests: githubManager.listPullRequests(repoPath, limit) });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/github/pr') {
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const num = parsedUrl.searchParams.get('number');
+        return this.sendJson(res, 200, githubManager.getPullRequest(repoPath, num));
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/github/runs') {
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 15;
+        return this.sendJson(res, 200, { runs: githubManager.listWorkflowRuns(repoPath, limit) });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/github/log') {
+      try {
+        const repoPath = resolveDefaultRepo(parsedUrl.searchParams.get('path'));
+        const runId = parsedUrl.searchParams.get('runId');
+        return this.sendJson(res, 200, { log: githubManager.getWorkflowRunLog(repoPath, runId) });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Hyprland Window & Workspace Controller ---
+    if (req.method === 'GET' && pathname === '/api/v1/hypr/windows') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.WINDOW_MANAGEMENT)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: window management is restricted' });
+      }
+      return this.sendJson(res, 200, { windows: hyprlandManager.getClients() });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/hypr/workspaces') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.WINDOW_MANAGEMENT)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: window management is restricted' });
+      }
+      return this.sendJson(res, 200, { workspaces: hyprlandManager.getWorkspaces() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/hypr/dispatch') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.WINDOW_MANAGEMENT)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: window management is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const { action, address, workspaceId } = body;
+        if (action === 'focus') hyprlandManager.focusWindow(address);
+        else if (action === 'close') hyprlandManager.closeWindow(address);
+        else if (action === 'moveto') hyprlandManager.moveToWorkspace(address, workspaceId);
+        else if (action === 'switch') hyprlandManager.switchWorkspace(workspaceId);
+        else throw new Error(`Unknown hypr dispatch action: ${action}`);
+
+        return this.sendJson(res, 200, { success: true });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Browser Companion Bridge ---
+    if (req.method === 'GET' && pathname === '/api/v1/browser/tabs') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSER_CONTROL)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: browser control is restricted' });
+      }
+      const tabs = await browserManager.getTabs();
+      return this.sendJson(res, 200, tabs);
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/browser/activate') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSER_CONTROL)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: browser control is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await browserManager.activateTab(body.tabId, body.windowId);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/browser/close') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSER_CONTROL)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: browser control is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await browserManager.closeTab(body.tabId);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/browser/open') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSER_CONTROL)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: browser control is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await browserManager.openTab(body.url);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/browser/inspect') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSER_CONTROL)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: browser control is restricted' });
+      }
+      try {
+        const result = await browserManager.inspectActivePage();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/browser/token') {
+      return this.sendJson(res, 200, { token: browserManager.getToken() });
+    }
+
+    // --- v1.2 Live Desktop Peek ---
+    if (req.method === 'GET' && pathname === '/api/v1/desktop/peek') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.DESKTOP_PEEK)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: desktop peek is restricted' });
+      }
+      try {
+        const quality = parseInt(parsedUrl.searchParams.get('q'), 10) || 70;
+        const result = await desktopPeekManager.captureJpeg(quality);
+        return this.sendJpeg(res, 200, result.buffer);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Audio & Media Controller ---
+    if (req.method === 'GET' && pathname === '/api/v1/audio') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUDIO_MEDIA)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: audio and media is restricted' });
+      }
+      return this.sendJson(res, 200, audioMediaManager.getAudioState());
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/audio/volume') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUDIO_MEDIA)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: audio and media is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const state = audioMediaManager.setVolume(body.percent);
+        return this.sendJson(res, 200, state);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/audio/mute') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUDIO_MEDIA)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: audio and media is restricted' });
+      }
+      try {
+        const state = audioMediaManager.toggleMute();
+        return this.sendJson(res, 200, state);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/media') {
+      return this.sendJson(res, 200, audioMediaManager.getMediaState());
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/media/control') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUDIO_MEDIA)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: audio and media is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = audioMediaManager.mediaControl(body.action);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Download Manager ---
+    if (req.method === 'GET' && pathname === '/api/v1/downloads') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.DOWNLOAD_MANAGER)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: download manager is restricted' });
+      }
+      const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 20;
+      const downloads = await downloadManager.getAllDownloads(limit);
+      return this.sendJson(res, 200, downloads);
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/downloads/action') {
+      try {
+        const body = await this.parseBody(req);
+        const result = await downloadManager.performAction(body.downloadId, body.action);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Universal Search ---
+    if (req.method === 'GET' && pathname === '/api/v1/search') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.SEARCH)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: universal search is restricted' });
+      }
+      const query = parsedUrl.searchParams.get('q') || '';
+      const limit = parseInt(parsedUrl.searchParams.get('limit'), 10) || 25;
+      const results = searchManager.search(query, limit);
+      return this.sendJson(res, 200, { query, results });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/search/reindex') {
+      try {
+        const result = await searchManager.reindex();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Automations & Scheduler ---
+    if (req.method === 'GET' && pathname === '/api/v1/automations') {
+      return this.sendJson(res, 200, { rules: automationEngine.listRules() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/automations/save') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUTOMATIONS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: automations is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const rule = automationEngine.saveRule(body);
+        return this.sendJson(res, 200, rule);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/automations/delete') {
+      try {
+        const body = await this.parseBody(req);
+        automationEngine.deleteRule(body.id);
+        return this.sendJson(res, 200, { success: true });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/schedules') {
+      return this.sendJson(res, 200, { schedules: scheduler.listSchedules() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/schedules/save') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.AUTOMATIONS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: scheduler is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const sched = scheduler.saveSchedule(body);
+        return this.sendJson(res, 200, sched);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/schedules/delete') {
+      try {
+        const body = await this.parseBody(req);
+        scheduler.deleteSchedule(body.id);
+        return this.sendJson(res, 200, { success: true });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // --- v1.2 Wake-on-LAN ---
+    if (req.method === 'GET' && pathname === '/api/v1/wol/status') {
+      return this.sendJson(res, 200, wakeOnLanManager.getPrimaryTarget());
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/wol/wake') {
+      try {
+        const body = await this.parseBody(req);
+        const result = await wakeOnLanManager.sendMagicPacket(body.mac, body.broadcastIp, body.port);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
     // 16. Command Submission Endpoint (Core execution)
     if (req.method === 'POST' && pathname === '/api/v1/commands') {
       try {
@@ -668,6 +1211,10 @@ export class HostServer {
     if (finalAction === ACTIONS.APPS_LIST || finalAction === ACTIONS.APPS_CLOSE) requiredCap = CAPABILITIES.RUNNING_APPS;
     if (finalAction === ACTIONS.ROUTINE_EXECUTE) requiredCap = CAPABILITIES.ROUTINES;
     if (finalAction === ACTIONS.WEB_SEARCH || finalAction === ACTIONS.OPEN_URL) requiredCap = CAPABILITIES.OPEN_WEB;
+    if (finalAction === ACTIONS.AUDIO_GET || finalAction === ACTIONS.AUDIO_SET_VOLUME || finalAction === ACTIONS.AUDIO_TOGGLE_MUTE || finalAction === ACTIONS.MEDIA_GET || finalAction === ACTIONS.MEDIA_CONTROL) requiredCap = CAPABILITIES.AUDIO_MEDIA;
+    if (finalAction === ACTIONS.DOWNLOADS_LIST) requiredCap = CAPABILITIES.DOWNLOAD_MANAGER;
+    if (finalAction === ACTIONS.SEARCH_QUERY) requiredCap = CAPABILITIES.SEARCH;
+    if (finalAction === ACTIONS.HYPR_WINDOWS || finalAction === ACTIONS.HYPR_WORKSPACES) requiredCap = CAPABILITIES.WINDOW_MANAGEMENT;
 
     if (!dbManager.isPermissionAllowed(deviceId, requiredCap)) {
       const reason = `Permission denied: device does not have permission for capability "${requiredCap}"`;
@@ -727,6 +1274,24 @@ export class HostServer {
         execResult = webManager.searchWeb(finalTarget);
       } else if (finalAction === ACTIONS.OPEN_URL) {
         execResult = webManager.openUrl(finalTarget);
+      } else if (finalAction === ACTIONS.AUDIO_GET) {
+        const state = audioMediaManager.getAudioState();
+        execResult = { success: true, message: `Volume: ${state.volume}% ${state.muted ? '[MUTED]' : ''}` };
+      } else if (finalAction === ACTIONS.AUDIO_TOGGLE_MUTE) {
+        const state = audioMediaManager.toggleMute();
+        execResult = { success: true, message: `Audio ${state.muted ? 'muted' : 'unmuted'} (${state.volume}%)` };
+      } else if (finalAction === ACTIONS.AUDIO_SET_VOLUME) {
+        const state = audioMediaManager.setVolume(finalTarget);
+        execResult = { success: true, message: `Volume set to ${state.volume}%` };
+      } else if (finalAction === ACTIONS.MEDIA_CONTROL) {
+        execResult = audioMediaManager.mediaControl(finalTarget);
+        execResult = { success: true, message: `Media: ${finalTarget}` };
+      } else if (finalAction === ACTIONS.SEARCH_QUERY) {
+        const res = searchManager.search(finalTarget, 5);
+        execResult = { success: true, message: `Found ${res.length} matches: ${res.map(r => r.title).join(', ')}` };
+      } else if (finalAction === ACTIONS.WOL_STATUS) {
+        const info = wakeOnLanManager.getPrimaryTarget();
+        execResult = { success: true, message: `WoL Primary MAC: ${info.primaryMac}` };
       } else {
         execResult = { success: false, error: `Unhandled action: ${finalAction}` };
       }
@@ -769,6 +1334,14 @@ export class HostServer {
 
   handleUpgrade(request, socket, head) {
     const parsedUrl = new URL(request.url, `https://${request.headers.host || 'localhost'}`);
+
+    if (parsedUrl.pathname === '/browser-bridge') {
+      this.wss.handleUpgrade(request, socket, head, ws => {
+        browserManager.handleWebSocketConnection(ws, request.url);
+      });
+      return;
+    }
+
     if (parsedUrl.pathname !== '/ws') {
       socket.destroy();
       return;
@@ -810,6 +1383,7 @@ export class HostServer {
 
       if (!isLocal) {
         notifier.phoneConnected(deviceName);
+        automationEngine.triggerEvent('DEVICE_CONNECTED', { deviceId, deviceName }, (evt) => this.broadcast(evt));
       }
 
       this.broadcastStateUpdate();
@@ -846,6 +1420,111 @@ export class HostServer {
           }));
           return;
         }
+
+        // Terminal Events
+        if (message.type === 'TERM_CREATE') {
+          if (!dbManager.isPermissionAllowed(client.deviceId, CAPABILITIES.TERMINAL_ACCESS)) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'Permission denied: terminal access is restricted' }));
+            return;
+          }
+          const session = terminalManager.createSession({
+            cwd: message.cwd,
+            cols: message.cols || 80,
+            rows: message.rows || 24,
+            title: message.title || 'Terminal'
+          });
+          const listener = (chunk) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: WS_EVENTS.TERM_DATA,
+                sessionId: session.id,
+                data: chunk
+              }));
+            }
+          };
+          terminalManager.addListener(session.id, listener);
+          ws.send(JSON.stringify({
+            type: 'TERM_CREATED',
+            sessionId: session.id,
+            pid: session.pid,
+            cols: session.cols,
+            rows: session.rows,
+            cwd: session.cwd,
+            buffer: terminalManager.getBuffer(session.id)
+          }));
+          return;
+        }
+
+        if (message.type === 'TERM_ATTACH') {
+          const session = terminalManager.sessions.get(message.sessionId);
+          if (session) {
+            const listener = (chunk) => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                  type: WS_EVENTS.TERM_DATA,
+                  sessionId: session.id,
+                  data: chunk
+                }));
+              }
+            };
+            terminalManager.addListener(session.id, listener);
+            ws.send(JSON.stringify({
+              type: 'TERM_ATTACHED',
+              sessionId: session.id,
+              buffer: terminalManager.getBuffer(session.id)
+            }));
+          }
+          return;
+        }
+
+        if (message.type === 'TERM_INPUT') {
+          terminalManager.write(message.sessionId, message.data);
+          return;
+        }
+
+        if (message.type === 'TERM_RESIZE') {
+          terminalManager.resize(message.sessionId, message.cols, message.rows);
+          return;
+        }
+
+        if (message.type === 'TERM_CLOSE') {
+          terminalManager.closeSession(message.sessionId);
+          return;
+        }
+
+        // Agent Events
+        if (message.type === 'AGENT_START') {
+          if (!dbManager.isPermissionAllowed(client.deviceId, CAPABILITIES.AI_AGENTS)) {
+            ws.send(JSON.stringify({ type: 'ERROR', message: 'Permission denied: AI agents is restricted' }));
+            return;
+          }
+          const broadcastFn = (evt) => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify(evt));
+            }
+          };
+          agentManager.startSession({
+            agentId: message.agentId,
+            workspacePath: message.workspacePath,
+            prompt: message.prompt,
+            broadcastFn
+          }).then(res => {
+            ws.send(JSON.stringify({ type: 'AGENT_STARTED', data: res }));
+          }).catch(err => {
+            ws.send(JSON.stringify({ type: 'AGENT_ERROR', error: err.message }));
+          });
+          return;
+        }
+
+        if (message.type === 'AGENT_INPUT') {
+          agentManager.sendInput(message.sessionId, message.input);
+          return;
+        }
+
+        if (message.type === 'AGENT_CANCEL') {
+          agentManager.cancelSession(message.sessionId);
+          return;
+        }
       } catch (err) {
         ws.send(JSON.stringify({
           type: 'ERROR',
@@ -858,6 +1537,7 @@ export class HostServer {
       const client = this.activeClients.get(ws);
       if (client && !client.isLocal) {
         notifier.phoneDisconnected(client.deviceName);
+        automationEngine.triggerEvent('DEVICE_DISCONNECTED', { deviceId: client.deviceId });
       }
       this.activeClients.delete(ws);
       this.broadcastStateUpdate();

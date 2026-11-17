@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.regnant.android.AppTab
 import org.regnant.android.data.CommandRecord
 import org.regnant.android.data.ConnectionStatus
 import org.regnant.android.data.HostIdentity
@@ -51,6 +52,7 @@ fun HomeScreen(
     onNavigateToPairing: () -> Unit,
     onNavigateToProjects: () -> Unit,
     onNavigateToDashboard: () -> Unit,
+    onNavigateToTab: (AppTab) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -145,6 +147,13 @@ fun HomeScreen(
                     enabled = isConnected,
                     onActionClick = { onSendCommand(it) },
                     onNavigateToProjects = onNavigateToProjects
+                )
+            }
+
+            item {
+                ControlMatrixSection(
+                    enabled = isConnected,
+                    onNavigateToTab = onNavigateToTab
                 )
             }
 
@@ -429,3 +438,84 @@ fun ActivityItem(
         }
     }
 }
+
+@Composable
+fun ControlMatrixSection(
+    enabled: Boolean,
+    onNavigateToTab: (AppTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "WORKSTATION CONTROL CENTRE",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Leaf,
+            letterSpacing = 1.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        val items = listOf(
+            Triple(AppTab.AGENTS, "AI Agents", "Claude, Codex & Agy"),
+            Triple(AppTab.TERMINAL, "Terminal", "Interactive PTY shell"),
+            Triple(AppTab.GITHUB, "Git & GitHub", "Branches, PRs & CI"),
+            Triple(AppTab.PEEK, "Desktop Peek", "Live Wayland stream"),
+            Triple(AppTab.MEDIA, "Sound & Media", "PipeWire & MPRIS"),
+            Triple(AppTab.SEARCH, "Universal Search", "FTS5 files & apps"),
+            Triple(AppTab.DOWNLOADS, "Downloads", "Recent & active"),
+            Triple(AppTab.AUTOMATIONS, "Automations", "Triggers & cron"),
+            Triple(AppTab.WOL, "Wake-on-LAN", "Magic packet sender")
+        )
+
+        for (chunk in items.chunked(3)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                for ((tab, title, desc) in chunk) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceCard)
+                            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                            .clickable(enabled = enabled) { onNavigateToTab(tab) }
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = tab.icon,
+                                contentDescription = title,
+                                tint = if (enabled) Coral else TextMuted,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = title,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (enabled) Candle else TextMuted,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = desc,
+                                fontSize = 8.sp,
+                                color = TextMuted,
+                                maxLines = 1,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -7,13 +7,15 @@ import { CAPABILITIES } from '../../../shared/protocol.js';
 
 export class DatabaseManager {
   constructor(dbPath = null) {
-    this.dbPath = dbPath || path.join(config.dataDir, 'regnant.db');
+    this.dbPath = dbPath || process.env.REGNANT_DB_PATH || path.join(config.dataDir, 'regnant.db');
     this.db = new DatabaseSync(this.dbPath);
     this.init();
   }
 
   init() {
     this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS devices (
         device_id TEXT PRIMARY KEY,
         device_name TEXT,
@@ -92,6 +94,60 @@ export class DatabaseManager {
         status TEXT NOT NULL, -- 'PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'
         created_at INTEGER NOT NULL,
         expires_at INTEGER NOT NULL
+      );
+
+      -- v1.2: AI Agent Sessions
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        id TEXT PRIMARY KEY,
+        agent_type TEXT NOT NULL,
+        workspace_path TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        status TEXT NOT NULL,
+        pid INTEGER,
+        created_at INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_created ON agent_sessions(created_at DESC);
+
+      -- v1.2: Automations
+      CREATE TABLE IF NOT EXISTS automations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        condition_json TEXT,
+        action_type TEXT NOT NULL,
+        action_payload TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+      );
+
+      -- v1.2: Schedules
+      CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        schedule_type TEXT NOT NULL,
+        schedule_expr TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        action_payload TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at INTEGER,
+        next_run_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      -- v1.2: Universal Search FTS5 Virtual Table
+      CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+        id,
+        type,
+        title,
+        path,
+        keywords
+      );
+
+      -- v1.2: Config Store
+      CREATE TABLE IF NOT EXISTS config_store (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       );
     `);
 
@@ -389,9 +445,173 @@ export class DatabaseManager {
     stmt.run(status, id);
   }
 
+  // --- AI Agent Sessions ---
+
+  createAgentSession(id, agentType, workspacePath, prompt, pid = null) {
+    const stmt = this.db.prepare(`
+      INSERT INTO agent_sessions (id, agent_type, workspace_path, prompt, status, pid, created_at)
+      VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
+    `);
+    stmt.run(id, agentType, workspacePath, prompt, pid, Date.now());
+  }
+
+  updateAgentSession(id, status, completedAt = Date.now()) {
+    const stmt = this.db.prepare(`
+      UPDATE agent_sessions SET status = ?, completed_at = ? WHERE id = ?
+    `);
+    stmt.run(status, completedAt, id);
+  }
+
+  getAgentSession(id) {
+    const stmt = this.db.prepare(`SELECT * FROM agent_sessions WHERE id = ?`);
+    return stmt.get(id) || null;
+  }
+
+  listAgentSessions(limit = 30) {
+    const stmt = this.db.prepare(`SELECT * FROM agent_sessions ORDER BY created_at DESC LIMIT ?`);
+    return stmt.all(limit);
+  }
+
+  // --- Automations ---
+
+  saveAutomation(id, name, triggerType, condition, actionType, actionPayload, enabled = 1) {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO automations (id, name, trigger_type, condition_json, action_type, action_payload, enabled, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      id,
+      name,
+      triggerType,
+      typeof condition === 'object' ? JSON.stringify(condition) : (condition || '{}'),
+      actionType,
+      typeof actionPayload === 'object' ? JSON.stringify(actionPayload) : (actionPayload || '{}'),
+      enabled ? 1 : 0,
+      Date.now()
+    );
+  }
+
+  listAutomations() {
+    const stmt = this.db.prepare(`SELECT * FROM automations ORDER BY created_at DESC`);
+    return stmt.all().map(a => ({
+      ...a,
+      condition: JSON.parse(a.condition_json || '{}'),
+      actionPayload: JSON.parse(a.action_payload || '{}')
+    }));
+  }
+
+  deleteAutomation(id) {
+    const stmt = this.db.prepare(`DELETE FROM automations WHERE id = ?`);
+    stmt.run(id);
+  }
+
+  // --- Schedules ---
+
+  saveSchedule(id, name, scheduleType, scheduleExpr, actionType, actionPayload, nextRunAt, enabled = 1) {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO schedules (id, name, schedule_type, schedule_expr, action_type, action_payload, enabled, next_run_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      id,
+      name,
+      scheduleType,
+      scheduleExpr,
+      actionType,
+      typeof actionPayload === 'object' ? JSON.stringify(actionPayload) : (actionPayload || '{}'),
+      enabled ? 1 : 0,
+      nextRunAt,
+      Date.now()
+    );
+  }
+
+  listSchedules() {
+    const stmt = this.db.prepare(`SELECT * FROM schedules ORDER BY next_run_at ASC`);
+    return stmt.all().map(s => ({
+      ...s,
+      actionPayload: JSON.parse(s.action_payload || '{}')
+    }));
+  }
+
+  updateScheduleRun(id, lastRunAt, nextRunAt) {
+    const stmt = this.db.prepare(`
+      UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?
+    `);
+    stmt.run(lastRunAt, nextRunAt, id);
+  }
+
+  deleteSchedule(id) {
+    const stmt = this.db.prepare(`DELETE FROM schedules WHERE id = ?`);
+    stmt.run(id);
+  }
+
+  // --- Universal Search Index (FTS5) ---
+
+  clearSearchIndex() {
+    this.db.exec(`DELETE FROM search_index;`);
+  }
+
+  indexSearchItem(id, type, title, itemPath, keywords = '') {
+    const stmt = this.db.prepare(`
+      INSERT INTO search_index (id, type, title, path, keywords)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    stmt.run(id, type, title, itemPath, keywords);
+  }
+
+  querySearch(query, limit = 25) {
+    const sanitized = query.replace(/"/g, '""').trim();
+    if (!sanitized) return [];
+    try {
+      const matchQuery = `"${sanitized}"*`;
+      const stmt = this.db.prepare(`
+        SELECT id, type, title, path, keywords, rank
+        FROM search_index
+        WHERE search_index MATCH ?
+        ORDER BY rank
+        LIMIT ?
+      `);
+      return stmt.all(matchQuery, limit);
+    } catch {
+      const stmt = this.db.prepare(`
+        SELECT id, type, title, path, keywords
+        FROM search_index
+        WHERE title LIKE ? OR path LIKE ? OR keywords LIKE ?
+        LIMIT ?
+      `);
+      const likeStr = `%${sanitized}%`;
+      return stmt.all(likeStr, likeStr, likeStr, limit);
+    }
+  }
+
+  // --- Config Store ---
+
+  getConfig(key, defaultValue = null) {
+    const stmt = this.db.prepare(`SELECT value FROM config_store WHERE key = ?`);
+    const row = stmt.get(key);
+    return row ? row.value : defaultValue;
+  }
+
+  setConfig(key, value) {
+    const stmt = this.db.prepare(`
+      INSERT INTO config_store (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
+    stmt.run(key, String(value));
+  }
+
   close() {
     this.db.close();
   }
 }
 
-export const dbManager = new DatabaseManager();
+let _dbManagerInstance = null;
+export const dbManager = new Proxy({}, {
+  get(target, prop) {
+    if (!_dbManagerInstance) {
+      _dbManagerInstance = new DatabaseManager();
+    }
+    const val = _dbManagerInstance[prop];
+    return typeof val === 'function' ? val.bind(_dbManagerInstance) : val;
+  }
+});

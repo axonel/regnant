@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Regnant Browser Companion",
+  "version": "1.2.0",
+  "description": "Secure local companion bridge for Regnant Workstation Control Centre",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Regnant Browser Bridge"
+  }
+}

@@ -29,12 +29,23 @@ import org.regnant.android.service.RegnantForegroundService
 import org.regnant.android.ui.screens.*
 import org.regnant.android.ui.theme.*
 
-enum class AppTab(val label: String, val icon: ImageVector) {
-    HOME("Home", Icons.Default.Home),
-    PROJECTS("Projects", Icons.Default.Code),
-    STATUS("Status", Icons.Default.Dashboard),
-    FILES("Files", Icons.Default.Folder),
-    DEVICES("Devices", Icons.Default.Computer)
+enum class AppTab(val label: String, val icon: ImageVector, val isPrimaryBar: Boolean = false) {
+    HOME("Home", Icons.Default.Home, true),
+    PROJECTS("Projects", Icons.Default.Code, true),
+    STATUS("Status", Icons.Default.Dashboard, true),
+    FILES("Files", Icons.Default.Folder, true),
+    DEVICES("Devices", Icons.Default.Computer, true),
+
+    // v1.2 Developer Workstation Control Centre Tabs
+    AGENTS("Agents", Icons.Default.SmartToy),
+    TERMINAL("Terminal", Icons.Default.Terminal),
+    GITHUB("GitHub", Icons.Default.Commit),
+    PEEK("Peek", Icons.Default.Visibility),
+    MEDIA("Media", Icons.Default.VolumeUp),
+    SEARCH("Search", Icons.Default.Search),
+    DOWNLOADS("Downloads", Icons.Default.Download),
+    AUTOMATIONS("Automations", Icons.Default.Bolt),
+    WOL("WoL", Icons.Default.PowerSettingsNew)
 }
 
 class MainActivity : ComponentActivity() {
@@ -72,15 +83,24 @@ class MainActivity : ComponentActivity() {
                 var persistentService by remember { mutableStateOf(securityStore.isPersistentServiceEnabled()) }
                 var notificationsEnabled by remember { mutableStateOf(securityStore.isNotificationsEnabled()) }
 
-                // Automatically trigger NSD discovery when viewing app
+                // Intercept back gesture if on a secondary tab
+                androidx.activity.compose.BackHandler(enabled = currentTab != AppTab.HOME) {
+                    currentTab = AppTab.HOME
+                }
+
+                // Automatically trigger connection & NSD discovery when viewing app
                 LaunchedEffect(Unit) {
+                    if (pairedHost != null) {
+                        client.connect()
+                    }
+
                     nsd.startDiscovery { host ->
                         val currentPaired = securityStore.getPairedHost()
-                        if (currentPaired != null && host.hostId == currentPaired.hostId &&
-                            (host.ip != currentPaired.ip || host.port != currentPaired.port)
-                        ) {
-                            securityStore.updateHostIpAndPort(host.ip, host.port)
-                            pairedHost = securityStore.getPairedHost()
+                        if (currentPaired != null && host.hostId == currentPaired.hostId) {
+                            if (host.ip != currentPaired.ip || host.port != currentPaired.port) {
+                                securityStore.updateHostIpAndPort(host.ip, host.port)
+                                pairedHost = securityStore.getPairedHost()
+                            }
                             client.connect()
                         }
                     }
@@ -102,8 +122,22 @@ class MainActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (!currentTab.isPrimaryBar) {
+                                    IconButton(
+                                        onClick = { currentTab = AppTab.HOME },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = Candle,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
                                 Text(
-                                    text = "REGNANT",
+                                    text = if (currentTab.isPrimaryBar) "REGNANT" else currentTab.label.uppercase(),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Black,
                                     color = Candle,
@@ -114,7 +148,7 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier
                                         .background(Coral, shape = androidx.compose.foundation.shape.CircleShape)
                                         .size(6.dp)
-                                )
+                                    )
                             }
 
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -132,7 +166,7 @@ class MainActivity : ComponentActivity() {
                             containerColor = SurfaceDark,
                             contentColor = Candle
                         ) {
-                            AppTab.entries.forEach { tab ->
+                            AppTab.entries.filter { it.isPrimaryBar }.forEach { tab ->
                                 NavigationBarItem(
                                     selected = currentTab == tab,
                                     onClick = { currentTab = tab },
@@ -169,7 +203,8 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToPairing = { currentTab = AppTab.DEVICES },
                                 onNavigateToProjects = { currentTab = AppTab.PROJECTS },
-                                onNavigateToDashboard = { currentTab = AppTab.STATUS }
+                                onNavigateToDashboard = { currentTab = AppTab.STATUS },
+                                onNavigateToTab = { currentTab = it }
                             )
 
                             AppTab.PROJECTS -> ProjectsScreen(
@@ -219,6 +254,51 @@ class MainActivity : ComponentActivity() {
                                     pairedHost = null
                                     Toast.makeText(this@MainActivity, "Host forgotten", Toast.LENGTH_SHORT).show()
                                 }
+                            )
+
+                            AppTab.AGENTS -> AgentsScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.TERMINAL -> TerminalScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.GITHUB -> GitHubScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.PEEK -> DesktopPeekScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.MEDIA -> MediaScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.SEARCH -> SearchScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.DOWNLOADS -> DownloadsScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.AUTOMATIONS -> AutomationsScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
+                            )
+
+                            AppTab.WOL -> WolScreen(
+                                client = client,
+                                connectionStatus = connectionStatus
                             )
                         }
                     }

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 280px;
+      padding: 14px;
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: #0C0F14;
+      color: #EFE9D7;
+    }
+    h3 {
+      margin: 0 0 10px 0;
+      color: #898861;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .field {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      margin-bottom: 4px;
+      color: #A0A5B5;
+    }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      background: #181C24;
+      border: 1px solid #343723;
+      border-radius: 4px;
+      color: #EFE9D7;
+      font-size: 12px;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      background: #343723;
+      border: 1px solid #898861;
+      color: #EFE9D7;
+      border-radius: 4px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #474b30;
+    }
+    #status {
+      font-size: 12px;
+      margin-top: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h3>Regnant Companion</h3>
+  <div class="field">
+    <label>Bridge URL</label>
+    <input id="url" type="text" value="ws://127.0.0.1:53317/browser-bridge" />
+  </div>
+  <div class="field">
+    <label>Extension Token</label>
+    <input id="token" type="text" placeholder="Enter token from Regnant" />
+  </div>
+  <button id="save">Save & Reconnect</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

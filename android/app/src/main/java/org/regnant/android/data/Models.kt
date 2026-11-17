@@ -157,3 +157,171 @@ data class RoutineResult(
     val totalSteps: Int,
     val stepResults: List<Map<String, Any>> = emptyList()
 )
+
+// --- v1.2 Developer Workstation Control Centre Models ---
+
+data class AgentItem(
+    val id: String = "",
+    val name: String = "",
+    val available: Boolean = false,
+    val version: String? = null,
+    val path: String? = null,
+    val guidance: String? = null
+)
+
+data class AgentSessionItem(
+    val id: String = "",
+    val agent_type: String = "",
+    val workspace_path: String = "",
+    val prompt: String = "",
+    val status: String = "",
+    val pid: Int? = null,
+    val created_at: Long = 0L,
+    val completed_at: Long? = null
+)
+
+data class TerminalSessionItem(
+    val id: String = "",
+    val pid: Int = 0,
+    val cwd: String = "",
+    val title: String = "Terminal",
+    val cols: Int = 80,
+    val rows: Int = 24,
+    val createdAt: Long = 0L
+)
+
+data class GitStatusItem(
+    val branch: String = "HEAD",
+    val tracking: String? = null,
+    val ahead: Int = 0,
+    val behind: Int = 0,
+    val isClean: Boolean = true,
+    val staged: List<Map<String, String>> = emptyList(),
+    val unstaged: List<Map<String, String>> = emptyList(),
+    val untracked: List<String> = emptyList()
+)
+
+data class GitBranchItem(
+    val name: String = "",
+    val upstream: String? = null,
+    val current: Boolean = false
+)
+
+data class GitCommitItem(
+    val hash: String = "",
+    val shortHash: String = "",
+    val author: String = "",
+    val email: String = "",
+    val timestamp: Long = 0L,
+    val subject: String = ""
+)
+
+data class GitHubPRItem(
+    val number: Int = 0,
+    val title: String = "",
+    val state: String = "OPEN",
+    val isDraft: Boolean = false,
+    val headRefName: String = "",
+    val baseRefName: String = "",
+    val updatedAt: String? = null,
+    val url: String? = null
+)
+
+data class GitHubRunItem(
+    val databaseId: Long = 0L,
+    val name: String = "",
+    val headBranch: String = "",
+    val headSha: String = "",
+    val status: String = "completed",
+    val conclusion: String? = null,
+    val event: String? = null,
+    val createdAt: String? = null,
+    val url: String? = null
+)
+
+data class HyprWindowItem(
+    val address: String = "",
+    val title: String = "",
+    val className: String = "",
+    val workspaceId: Int = 1,
+    val workspaceName: String = "1",
+    val pid: Int = 0,
+    val visible: Boolean = true
+)
+
+data class HyprWorkspaceItem(
+    val id: Int = 1,
+    val name: String = "1",
+    val monitor: String = "",
+    val windowsCount: Int = 0
+)
+
+data class BrowserTabItem(
+    val id: Int = 0,
+    val windowId: Int = 0,
+    val title: String = "",
+    val url: String = "",
+    val active: Boolean = false,
+    val favIconUrl: String? = null
+)
+
+data class AudioState(
+    val volume: Int = 50,
+    val muted: Boolean = false,
+    val sink: String = "Default Audio Sink"
+)
+
+data class MediaState(
+    val available: Boolean = false,
+    val player: String? = null,
+    val playbackStatus: String = "Stopped",
+    val title: String = "",
+    val artist: String = ""
+)
+
+data class DownloadFileItem(
+    val name: String = "",
+    val path: String = "",
+    val size: Long = 0L,
+    val mtime: Double = 0.0,
+    val isPartial: Boolean = false
+)
+
+data class SearchItem(
+    val id: String = "",
+    val type: String = "file",
+    val title: String = "",
+    val path: String = "",
+    val keywords: String? = null
+)
+
+data class AutomationRuleItem(
+    val id: String = "",
+    val name: String = "",
+    val trigger_type: String = "",
+    val action_type: String = "",
+    val enabled: Int = 1
+)
+
+data class ScheduleItem(
+    val id: String = "",
+    val name: String = "",
+    val schedule_type: String = "INTERVAL",
+    val schedule_expr: String = "3600",
+    val action_type: String = "",
+    val enabled: Int = 1,
+    val next_run_at: Long = 0L
+)
+
+data class NetworkInterfaceItem(
+    val name: String = "",
+    val mac: String = "",
+    val type: String = "wifi",
+    val wowlan: Boolean = false
+)
+
+data class WolStatusItem(
+    val interfaces: List<NetworkInterfaceItem> = emptyList(),
+    val primaryMac: String? = null
+)
+
