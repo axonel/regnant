@@ -6,7 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Terminal
@@ -26,6 +26,7 @@ import org.regnant.android.ui.theme.*
 fun QuickActionChips(
     enabled: Boolean,
     onActionClick: (String) -> Unit,
+    onNavigateToProjects: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -64,11 +65,11 @@ fun QuickActionChips(
                 onClick = { onActionClick("open file manager") }
             )
             ActionCard(
-                title = "Calc",
-                icon = Icons.Default.Calculate,
+                title = "Projects",
+                icon = Icons.Default.Code,
                 enabled = enabled,
                 modifier = Modifier.weight(1f),
-                onClick = { onActionClick("open calculator") }
+                onClick = onNavigateToProjects
             )
         }
     }

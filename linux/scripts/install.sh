@@ -26,7 +26,7 @@ chmod +x "$BIN_DIR/regnant-host"
 # 3. Create desktop GUI runner script
 cat << EOF > "$BIN_DIR/regnant-desktop"
 #!/usr/bin/env bash
-exec /usr/bin/electron42 "$PROJECT_ROOT/linux/desktop/src/main.js" --ozone-platform=wayland "\$@"
+exec /usr/bin/electron42 "$PROJECT_ROOT/linux/desktop/src/main.js" --ozone-platform=wayland --disable-gpu --disable-gpu-sandbox "\$@"
 EOF
 chmod +x "$BIN_DIR/regnant-desktop"
 

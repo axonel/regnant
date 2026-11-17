@@ -1,65 +1,88 @@
-# Regnant — Verification & Testing Report
+# REGNANT — Testing & Verification Report
 
-## 1. Automated Test Suites
+## 1. Test Overview
 
-### 1.1 Host Unit Tests (`linux/host/test/host.test.js`)
-Executed via Node.js native test runner:
-```bash
-cd linux/host
-node --test test/host.test.js
+This report details the comprehensive verification of **Regnant v1.1.0** across unit testing, integration testing, real-device Wi-Fi validation, and UI screenshot evidence.
+
+---
+
+## 2. Automated Test Results
+
+### 1. Host Engine & Parser Tests (`test/host.test.js`)
 ```
-**Test Results: 7/7 Passing**
-- `CommandParser — valid commands and aliases`: PASS
-  - Verified aliases: "open terminal", "Launch Terminal", "start terminal!", "terminal", "open brave", "launch brave", "open browser", "open file manager", "open files", "open calculator", "calc", "open downloads", "show downloads", "open home".
-- `CommandParser — rejection of unsupported or malicious inputs`: PASS
-  - Verified rejection of: "delete all my files", "rm -rf /", "sudo rm -rf ~", "cat /etc/passwd", "bash -c whoami", "drop table users", and unknown phrases.
-- `ActionExecutor — detects real desktop applications`: PASS
-  - Verified detection of `foot`, `brave`, `nautilus`, `omacalc`, `Downloads`, and home directory.
-- `CryptoManager — pairing code lifecycle, rate-limiting & single use`: PASS
-  - Verified 6-character code format, active status, rate limit invalidation after 3 failures, and immediate single-use destruction upon successful pairing.
-- `CryptoManager — bearer token generation, hashing and verification`: PASS
-  - Verified 256-bit token entropy and constant-time SHA-256 verification.
-- `DatabaseManager — device lifecycle, replay prevention & history`: PASS
-  - Verified SQLite registration, listing, revocation, replay request ID deduplication, and historical record retrieval.
+✔ CommandParser — valid commands and aliases (0.81ms)
+✔ CommandParser — rejection of unsupported or malicious inputs (0.18ms)
+✔ ActionExecutor — detects real desktop applications (0.10ms)
+✔ CryptoManager — pairing code lifecycle, rate-limiting & single use (7.92ms)
+✔ CryptoManager — pairing code rate limit invalidation (6.98ms)
+✔ CryptoManager — bearer token generation, hashing and verification (6.89ms)
+✔ DatabaseManager — device lifecycle, replay prevention & history (1.80ms)
 
-### 1.2 Integration Tests (`linux/host/test/integration.test.js`)
-Executed via Node.js native test runner:
-```bash
-cd linux/host
-node --test test/integration.test.js
+Tests: 7 passed, 0 failed, duration: 81.7ms
 ```
-**Test Results: 1/1 Suite Passing**
-- Tested automated HTTPS server initialization on port 8799.
-- Tested `/api/v1/health` endpoint.
-- Tested temporary pairing code generation and verification via `/api/v1/pair`.
-- Verified unauthenticated command rejection (HTTP 401).
-- Verified authenticated command submission and successful foot execution.
-- Verified duplicate `requestId` replay attack rejection (HTTP 400 with `Duplicate request ID`).
-- Verified unsupported command rejection over HTTP.
-- Verified authenticated WebSocket connection (`wss://127.0.0.1:8799/ws?token=...`) and Ping/Pong heartbeat.
-- Verified device revocation (`/api/v1/devices/revoke`) and subsequent denial of access.
 
-## 2. Physical Android Device End-to-End Validation
+### 2. Feature Expansion Engine Tests (`test/expansion.test.js`)
+```
+✔ ProjectManager — IDE detection and project listing (0.63ms)
+✔ MetricsCollector — System snapshot structure and validity (0.60ms)
+✔ FileBrowser — Directory traversal protection and approved roots (0.63ms)
+✔ WebManager — URL validation rejects non-HTTP protocols (0.18ms)
+✔ RoutineManager — Pre-seeded routines and step structure (0.15ms)
+✔ DatabaseManager — Granular permissions matrix (9.79ms)
 
-Tests executed live against connected hardware:
-- **Device**: vivo I2407
-- **Operating System**: Android 16 (API Level 36, Baklava)
-- **Workstation**: Omarchy Linux 4.5.0, Hyprland (Wayland session `wayland-1`)
+Tests: 6 passed, 0 failed, duration: 63.2ms
+```
 
-| Test Scenario | Action Performed | Result | Verification Proof |
+### 3. End-to-End Integration Suite (`test/integration.test.js`)
+```
+✔ Integration — Server startup, pairing, authenticated commands, replay & revocation (293.95ms)
+
+Tests: 1 passed, 0 failed, duration: 360.0ms
+```
+
+**Overall Automated Test Status: 14 / 14 Passed (100% Success Rate)**
+
+---
+
+## 3. Real Physical Device Verification (Vivo I2407, Android 16)
+
+All physical device tests were performed with **ADB reverse tunnels permanently removed** (`adb reverse --remove-all`), communicating strictly over genuine local Wi-Fi.
+
+| Test Case | Method | Observed Result | Status |
 |---|---|---|---|
-| **1. APK Compilation & Installation** | Built debug APK and streamed via ADB | PASSED | `adb install -r app-debug.apk` exited with `Success` |
-| **2. Initial App Launch** | Started `org.regnant.android/.MainActivity` | PASSED | App opened with custom dark palette and geometric crown icon |
-| **3. Temporary Code Pairing** | Host generated `RG-BN5F`; entered in app | PASSED | Toast: "Paired successfully with electron (Omarchy)!"; code immediately consumed |
-| **4. Pinned TLS & Token Storage** | Verified Android Keystore persistence | PASSED | Token and SHA-256 fingerprint saved in `regnant_secure_prefs` |
-| **5. Bi-directional WebSocket** | Upgraded connection to `wss://` | PASSED | Live status indicator turned green `CONNECTED` |
-| **6. Launch Foot Terminal** | Tapped "Terminal" chip on phone | PASSED | Workstation spawned `/usr/bin/foot` (PID 12248); Android showed `COMPLETED` |
-| **7. Launch Brave Browser** | Tapped "Brave" chip on phone | PASSED | Workstation spawned `/usr/bin/brave`; Android showed `COMPLETED` |
-| **8. Launch Nautilus Files** | Tapped "Files" chip on phone | PASSED | Workstation spawned `/usr/bin/nautilus` (PID 12610); Android showed `COMPLETED` |
-| **9. Launch Omacalc Calculator** | Tapped "Calc" chip on phone | PASSED | Workstation spawned `/home/roonakyadav/.local/bin/omacalc` (PID 12727); Android showed `COMPLETED` |
-| **10. Open Downloads Folder** | Typed "open downloads" and tapped Send | PASSED | Workstation opened Downloads directory via `xdg-open`; Android showed `COMPLETED` |
-| **11. Reject Destructive Command** | Typed "delete all my files" and tapped Send | PASSED | Rejected with error: `Command rejected: arbitrary shell and destructive commands are not permitted.`; status `REJECTED` |
-| **12. Automatic Reconnection** | Force-stopped Android app and relaunched | PASSED | Reconnected automatically without re-entering pairing code; `connectedClientsCount=1` |
-| **13. Workstation Service Restart** | Restarted `regnant-host.service` | PASSED | Android auto-reconnect backoff re-established session; `connectedClientsCount=1` |
-| **14. Desktop Notification** | Executed commands on phone | PASSED | Native desktop notifications posted via `notify-send` |
-| **15. Idle Resource Use** | Measured background daemon memory & CPU | PASSED | Daemon uses ~29.4MB RAM and 0% idle CPU |
+| **Network Discovery** | Android NSD / Avahi mDNS | App discovered `Regnant - electron (Omarchy)` on port `53317` with IPv6 link-local address | **PASS** |
+| **Initial Pairing** | Single-use 6-character code (`RG-XC3M`) | Cryptographic exchange completed over TLS; device stored token in Android Keystore | **PASS** |
+| **Persistent WebSocket** | WSS connection over Wi-Fi | Handshake completed; status switched to `CONNECTED` (green badge) | **PASS** |
+| **Live Telemetry** | Background /proc streaming | Battery (34%), CPU usage (8.0%), and RAM consumption (63.2%) update live | **PASS** |
+| **Quick Action: Terminal** | Tap "Terminal" chip on Home screen | Dispatched via WebSocket; launched `foot` on Hyprland desktop; `COMPLETED` confirmation arrived | **PASS** |
+| **Quick Action: Brave** | Type "open brave" + Send | Launched `/opt/brave-bin/brave`; status badge `COMPLETED` | **PASS** |
+| **Quick Action: Projects** | Tap "Projects" chip (replaces Calc) | Navigated to Workspaces screen; displayed `MAD`, `cml-kaggle`, `concord`, `WrongStack` | **PASS** |
+| **Workspace IDE Launch** | Tap "Terminal" on `MAD` project card | Spawned `/usr/bin/foot -D /home/roonakyadav/Projects/MAD` directly into directory | **PASS** |
+| **Status Dashboard** | Navigate to Status tab | Rendered hardware gauges: Battery, CPU, RAM, Home Storage (35.5% used), Uptime | **PASS** |
+| **Remote File Browser** | Tap Files tab -> `Projects` -> `regnant` | Traversed `/home/roonakyadav/Projects/regnant`; listed subdirectories & files | **PASS** |
+| **In-App Text Preview** | Tap `README.md` (6 KB) in File Browser | Read file content over TLS and displayed syntax-styled markdown preview modal | **PASS** |
+| **Session Lock Confirmation** | Tap "Lock Screen" on Dashboard | Displayed confirmation alert explaining `loginctl lock-session`; safely cancellable | **PASS** |
+
+---
+
+## 4. UI Screenshot Evidence
+
+The following captures have been recorded directly from the physical Android device:
+
+1. `assets/home_screen.png`: Home screen showing connected workstation, live hardware telemetry (Battery, CPU, RAM), and Quick Action chips (Terminal, Brave, Files, Projects).
+2. `assets/home_recent_activity.png`: Home screen showing recent activity feed with `Launched foot successfully` and `Launched brave successfully` with `COMPLETED` badges.
+3. `assets/projects_screen.png`: Workspaces screen listing discovered development repositories (`MAD`, `WrongStack`, `cml-kaggle`, `concord`) with IDE launch triggers.
+4. `assets/status_screen.png`: Workstation hardware status dashboard displaying battery power, CPU utilization, memory allocation, storage capacity, and uptime.
+5. `assets/files_screen.png`: Remote file browser root screen showing authorized directories (`Downloads`, `Projects`).
+6. `assets/file_browser_listing.png`: File browser directory listing inside `/home/roonakyadav/Projects`.
+7. `assets/file_preview_modal.png`: In-app file viewer modal displaying `README.md` contents fetched over TLS.
+
+---
+
+## 5. Host Resource Consumption Benchmarks
+
+Measured under active background operation:
+- **CPU Utilization**: `0.0%`
+- **Resident Set Size (RSS)**: `74.5 MB`
+- **Memory Percentage**: `0.4%` of system RAM
+- **Active Threads**: 8 threads (Node.js event loop + worker pool)

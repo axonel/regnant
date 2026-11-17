@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
+import java.net.Inet4Address
+import java.net.Inet6Address
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,8 +48,6 @@ class NsdDiscovery(private val context: Context) {
             override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
                 Log.d(tag, "Service found: ${serviceInfo?.serviceName}")
                 if (serviceInfo == null) return
-
-                // Resolve service details
                 resolveService(serviceInfo, onHostFound)
             }
 
@@ -74,11 +74,15 @@ class NsdDiscovery(private val context: Context) {
             override fun onServiceResolved(resolvedInfo: NsdServiceInfo?) {
                 if (resolvedInfo == null) return
                 val host = resolvedInfo.host ?: return
-                // Only use IPv4 addresses for reliable local Wi-Fi routing
-                if (host !is java.net.Inet4Address) return
-                val ip = host.hostAddress ?: return
-                val port = resolvedInfo.port
 
+                // Support both IPv4 and IPv6 link-local
+                val rawIp = when (host) {
+                    is Inet4Address -> host.hostAddress
+                    is Inet6Address -> host.hostAddress?.substringBefore("%")
+                    else -> host.hostAddress
+                } ?: return
+
+                val port = resolvedInfo.port
                 val attributes = resolvedInfo.attributes
                 val hostId = attributes["hostId"]?.let { String(it) } ?: "unknown-host-id"
                 val name = attributes["name"]?.let { String(it) } ?: resolvedInfo.serviceName ?: "Omarchy Laptop"
@@ -87,14 +91,14 @@ class NsdDiscovery(private val context: Context) {
                 val identity = HostIdentity(
                     hostId = hostId,
                     hostName = name,
-                    ip = ip,
+                    ip = rawIp,
                     port = port,
                     certFingerprint = fp,
                     lastSeen = System.currentTimeMillis()
                 )
 
                 val current = _discoveredHosts.value.toMutableList()
-                current.removeAll { it.hostId == hostId || it.ip == ip }
+                current.removeAll { it.hostId == hostId || it.ip == rawIp }
                 current.add(identity)
                 _discoveredHosts.value = current
 

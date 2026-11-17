@@ -1,59 +1,63 @@
-# REGNANT
+# REGNANT (v1.1.0)
 
 > Personal mobile control plane for Omarchy Linux workstation.
 
 Regnant connects an Android smartphone directly to a Linux laptop over the local network. It operates without external cloud dependencies, without AI models at runtime, without public relays, and without QR codes.
 
 ```
-       +----------------------------+
-       |       REGNANT ANDROID      |
-       |  Native Kotlin + Compose   |
-       |  Android Keystore AES-GCM  |
-       +----------------------------+
-                     │
-         TLS 1.3 / Authenticated WSS
-       Local Wi-Fi mDNS (_regnant._tcp)
-                     │
-       +----------------------------+
-       |        REGNANT HOST        |
-       |  Node.js Daemon (port 8765)|
-       |  SQLite + Strict Executor  |
-       +----------------------------+
-                     │
-         Wayland Session IPC
-       +----------------------------+
-       |       LINUX WORKSTATION    |
-       |  Foot, Brave, Nautilus,    |
-       |  Omacalc, Hyprland Desktop |
-       +----------------------------+
+       +------------------------------------+
+       |          REGNANT ANDROID           |
+       |  Native Kotlin + Jetpack Compose   |
+       |  Android Keystore AES-GCM          |
+       |  Scoped Wi-Fi DNS (RegnantDns)     |
+       +------------------------------------+
+                         │
+             TLS 1.3 / Authenticated WSS
+          Local Wi-Fi mDNS (_regnant._tcp)
+               Dual-Stack Port 53317
+                         │
+       +------------------------------------+
+       |            REGNANT HOST            |
+       |  Node.js Daemon (port 53317)       |
+       |  SQLite + Strict Non-Shell Engine  |
+       |  Hardware Telemetry Streamer       |
+       +------------------------------------+
+                         │
+             Wayland Session IPC & Sockets
+       +------------------------------------+
+       |          LINUX WORKSTATION         |
+       |  Foot, Brave, Nautilus, Hyprland,  |
+       |  VS Code, Antigravity, Systemd     |
+       +------------------------------------+
 ```
 
 ---
 
-## Features
+## What's New in v1.1.0
 
-- **Local Wi-Fi Peer-to-Peer**: Complete privacy. Zero cloud relays, zero external telemetry.
-- **Single-Use 6-Character Pairing**: No QR codes. A temporary, rate-limited alphanumeric code pairs devices once.
-- **Automatic Reconnection**: Discover each other automatically via DNS-SD / mDNS (`_regnant._tcp`) after pairing.
-- **Hardware-Backed Cryptography**: Android Keystore encryption for tokens; TLS 1.3 with SHA-256 certificate fingerprint pinning.
-- **Deterministic Action Parser**: Translates natural phrases ("open terminal", "open brave", "open files", "open calculator", "open downloads") without running an LLM.
-- **Strict Non-Shell Execution**: Absolute path resolution to inspected binaries (`foot`, `brave`, `nautilus`, `omacalc`). Shell injection and arbitrary commands are rejected.
-- **Dual Client Architecture**: Lightweight user-level systemd background host daemon + Electron 42 desktop GUI with system tray integration.
-- **Minimal Resource Footprint**: Idle memory ~29MB RAM, 0% CPU, 0% GPU.
+- **P0 Real Wi-Fi & AP-Isolation Bypass**: Permanent removal of ADB reverse. Resolved AP client isolation using dual-stack IPv6 link-local multicast and `RegnantDns` scoped resolution.
+- **Project Launcher**: Replaced Calculator quick action with a full development workspace launcher for `~/Projects` with automatic IDE detection (`code`, `antigravity`, `foot -D`).
+- **Live Hardware Telemetry**: Real-time streaming of laptop Battery %, CPU utilization (`/proc/stat`), RAM allocation (`/proc/meminfo`), Home Storage, and Uptime.
+- **Remote File Browser & Text Preview**: Browse authorized directories (`~/Projects`, `~/Downloads`) with in-app syntax preview and directory traversal sandboxing.
+- **Manual Clipboard Sync**: User-initiated fetch and push of Wayland clipboard via `wl-paste` and `wl-copy`. Zero background polling.
+- **Hardware & Power Safety**: One-tap session locking (`loginctl lock-session`) and suspend (`systemctl suspend`) with mobile confirmation alerts; approval-gated shutdown/reboot.
+- **Granular Permissions Matrix**: SQLite-backed capability permissions allowing fine-grained revocation per device.
 
 ---
 
-## Color Palette & Visual Design
+## Color Palette & Sovereign Command Aesthetic
 
-Designed strictly following the sovereign command aesthetic:
+Designed strictly following the Sovereign Command palette:
 
 | Color Name | Hexadecimal | Usage |
 |---|---|---|
 | **Main Background** | `#0C0F14` | Window background & surface base |
-| **Candle** | `#EFE9D7` | Primary text and icons |
+| **Candle** | `#EFE9D7` | Primary text, titles, and icons |
 | **Coral** | `#7D2826` | Primary action buttons & badges |
-| **Leaf** | `#898861` | Secondary accents & labels |
+| **Leaf** | `#898861` | Secondary accents, labels, and borders |
 | **Juniper** | `#343723` | Cards, chips & subtle containers |
+| **Status Green** | `#4E8E5F` | Active connection indicators |
+| **Status Red** | `#A33C3A` | Warnings, errors, and revocations |
 
 ---
 
@@ -62,65 +66,69 @@ Designed strictly following the sovereign command aesthetic:
 ```
 regnant/
 ├── android/                         # Native Android Application (Kotlin, Jetpack Compose)
-│   ├── app/
-│   │   ├── src/main/java/org/regnant/android/
-│   │   │   ├── MainActivity.kt      # Main Compose Activity
-│   │   │   ├── RegnantApp.kt        # Application lifecycle & background listener
-│   │   │   ├── data/                # SecurityStore (Keystore), Models
-│   │   │   ├── network/             # RegnantClient (OkHttp TLS/WSS), NsdDiscovery
-│   │   │   ├── service/             # RegnantForegroundService (connectedDevice)
-│   │   │   └── ui/                  # Theme, Screens (Home, Devices, Activity, Settings)
-│   │   └── build.gradle.kts
+│   ├── app/src/main/java/org/regnant/android/
+│   │   ├── MainActivity.kt          # 5-Tab Scaffold (Home, Projects, Status, Files, Devices)
+│   │   ├── RegnantApp.kt            # Application lifecycle & background notifications
+│   │   ├── data/                    # SecurityStore (Keystore), Models
+│   │   ├── network/                 # RegnantClient (OkHttp TLS/WSS, RegnantDns), NsdDiscovery
+│   │   └── ui/                      # Screens (Home, Projects, Dashboard, Files, Devices)
 │   └── build.gradle.kts
 ├── linux/
 │   ├── host/                        # Background Host Daemon (Node.js 26)
 │   │   ├── src/
-│   │   │   ├── index.js             # CLI Daemon Entry
-│   │   │   ├── server.js            # HTTPS / WSS Server & Session Router
+│   │   │   ├── index.js             # CLI Daemon Entrypoint
+│   │   │   ├── server.js            # HTTPS / WSS Server (Port 53317, Dual-Stack)
 │   │   │   ├── parser.js            # Deterministic natural language command parser
-│   │   │   ├── executor.js          # Non-shell application executor (Foot, Brave, Nautilus, Omacalc)
-│   │   │   ├── crypto.js            # TLS certs, 6-char pairing code, token hashing
-│   │   │   ├── db.js                # SQLite device registry & replay prevention
-│   │   │   ├── discovery.js         # DNS-SD / Avahi service announcement
+│   │   │   ├── executor.js          # Non-shell application executor (Foot, Brave, Nautilus)
+│   │   │   ├── projects.js          # Workspace detection & IDE launcher
+│   │   │   ├── metrics.js           # Non-blocking hardware telemetry collector
+│   │   │   ├── filebrowser.js       # Directory traversal sandboxing & text preview
+│   │   │   ├── transfer.js          # Chunked streaming upload/download
+│   │   │   ├── clipboard.js         # Wayland clipboard bridge (wl-paste, wl-copy)
+│   │   │   ├── power.js             # Session lock, suspend, approval-gated shutdown
+│   │   │   ├── appmanager.js        # Hyprland window client manager
+│   │   │   ├── routines.js          # Pre-packaged multi-step automation routines
+│   │   │   ├── crypto.js            # TLS certs, 6-char pairing code, SHA-256 tokens
+│   │   │   ├── db.js                # SQLite device registry, history & permissions
+│   │   │   ├── discovery.js         # Avahi / DNS-SD service announcement
 │   │   │   └── notifier.js          # Native desktop notifications via notify-send
-│   │   └── test/                    # Unit and integration test suites
+│   │   └── test/                    # Unit, expansion, and integration test suites
 │   ├── desktop/                     # Electron 42 Desktop GUI
 │   │   └── src/                     # main.js, preload.js, index.html, styles.css, renderer.js
-│   ├── scripts/
-│   │   ├── install.sh               # User-level systemd service & desktop launcher installer
-│   │   └── uninstall.sh             # Clean uninstaller
-│   └── regnant.desktop              # Freedesktop application entry
-├── assets/                          # Original SVG and rasterized PNG icon assets
+│   └── scripts/
+│       ├── install.sh               # User-level systemd service & desktop launcher installer
+│       └── uninstall.sh             # Clean uninstaller
+├── assets/                          # Original SVG, rasterized PNG icons, and UI screenshots
 └── docs/                            # In-depth architectural & testing documentation
     ├── environment-audit.md         # Full audit of Omarchy, Hyprland & Android device
-    ├── architecture-decisions.md    # ADR documenting stack selection & rationale
-    ├── security.md                  # Security model, threat analysis & token lifecycle
-    ├── networking.md                # DNS-SD, WSS protocol, endpoints & fallbacks
-    ├── android.md                   # Android implementation & Keystore details
-    ├── linux.md                     # Linux host daemon & Wayland session integration
-    ├── testing.md                   # Automated test results & live device verification
-    └── known-limitations.md         # Router client isolation & fallback mitigations
+    ├── implementation-audit.md      # Wi-Fi diagnostics, firewall analysis & architecture
+    ├── networking.md                # Dual-stack mDNS, UFW port 53317, AP isolation & RegnantDns
+    ├── projects.md                  # Project launcher & workspace execution specification
+    ├── file-transfers.md            # File browser, sandboxing & chunked transfer protocol
+    ├── permissions.md               # Capability matrix & consequential approval workflow
+    ├── security.md                  # Cryptographic model, Keystore storage & token lifecycle
+    └── testing.md                   # Full test results, physical device verification & evidence
 ```
 
 ---
 
 ## Quick Start Guide
 
-### 1. Start the Linux Host & Desktop
+### 1. Install & Start the Linux Host
 ```bash
-# Run the installer (registers and starts systemd user service + desktop icon)
+# Run installer (creates systemd user service + desktop icon)
 bash linux/scripts/install.sh
 
-# Open the desktop interface
+# Open the desktop companion
 regnant-desktop
 ```
 
 ### 2. Install & Open Android Application
-The pre-compiled debug APK is located at:
+The debug APK is compiled at:
 `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ```bash
-# Install onto connected phone via ADB
+# Install to device via ADB
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 # Launch the app
@@ -128,28 +136,28 @@ adb shell am start -n org.regnant.android/.MainActivity
 ```
 
 ### 3. Pair Devices Once
-1. On the Linux laptop, Regnant displays a 6-character code (e.g. `RG-BN5F`).
+1. On the Linux laptop, Regnant displays a 6-character code (e.g. `RG-XC3M`).
 2. On Android, tap **Enter Pairing Code** and input the code.
-3. Both devices immediately exchange cryptographic credentials and pin the host's TLS certificate.
+3. Both devices exchange cryptographic credentials and pin the host's TLS certificate.
 4. The status pill turns green **CONNECTED**.
 
 ### 4. Control Your Workstation
 - Tap **Terminal** to launch `foot`.
 - Tap **Brave** to open Brave browser.
 - Tap **Files** to open Nautilus file manager.
-- Tap **Calc** to open Omacalc calculator.
-- Say or type `"open downloads"` to open the Downloads folder.
-- Destructive commands like `"delete all my files"` are strictly rejected.
+- Tap **Projects** to view and launch workspaces (`MAD`, `WrongStack`, etc.) into VS Code or Foot.
+- Say or type `"open downloads"` or `"open brave"`.
+- Check live battery, CPU, RAM, and home storage on the **Status** tab.
+- Browse and preview workstation code files on the **Files** tab.
 
 ---
 
-## Testing
+## Testing & Quality Assurance
 
 ```bash
-# Run host unit tests
+# Run all host unit, expansion, and integration test suites
 cd linux/host
 node --test test/host.test.js
-
-# Run integration tests
+node --test test/expansion.test.js
 node --test test/integration.test.js
 ```

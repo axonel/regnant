@@ -84,6 +84,63 @@ async function refreshStatus() {
       historyList.innerHTML = '<div class="empty-state">No commands executed yet</div>';
     }
 
+    // Telemetry metrics
+    try {
+      const metrics = await window.regnantApi.getMetrics();
+      if (metrics && !metrics.error) {
+        const battEl = document.getElementById('metricBattery');
+        const cpuEl = document.getElementById('metricCpu');
+        const ramEl = document.getElementById('metricRam');
+        if (battEl && metrics.battery) {
+          battEl.textContent = `🔋 ${metrics.battery.percent}% ${metrics.battery.charging ? '⚡' : ''}`;
+        }
+        if (cpuEl && metrics.cpu) {
+          cpuEl.textContent = `⚡ CPU ${metrics.cpu.usagePercent}%`;
+        }
+        if (ramEl && metrics.ram) {
+          ramEl.textContent = `💾 RAM ${metrics.ram.usedPercent}%`;
+        }
+      }
+    } catch (e) {}
+
+    // Projects list
+    try {
+      const projData = await window.regnantApi.getProjects();
+      if (projData && projData.projects) {
+        const pCountEl = document.getElementById('projectCount');
+        const pListEl = document.getElementById('projectsList');
+        if (pCountEl) pCountEl.textContent = `${projData.projects.length} workspaces`;
+        if (pListEl && projData.projects.length > 0) {
+          pListEl.innerHTML = projData.projects.map(p => `
+            <div class="device-card" style="margin-bottom: 6px;">
+              <div>
+                <div class="device-name" style="font-size: 13px;">${escapeHtml(p.name)}</div>
+                <div class="device-meta" style="font-family: monospace;">${escapeHtml(p.path)}</div>
+              </div>
+              <span class="badge" style="font-size: 10px;">${escapeHtml(p.ide || 'auto')}</span>
+            </div>
+          `).join('');
+        }
+      }
+    } catch (e) {}
+
+    // Approved roots
+    try {
+      const rootsData = await window.regnantApi.getRoots();
+      const rootsListEl = document.getElementById('rootsList');
+      if (rootsListEl && rootsData && rootsData.roots) {
+        rootsListEl.innerHTML = rootsData.roots.map(r => `
+          <div class="device-card" style="margin-bottom: 6px;">
+            <div>
+              <div class="device-name" style="font-size: 13px;">${escapeHtml(r.label)}</div>
+              <div class="device-meta" style="font-family: monospace;">${escapeHtml(r.path)}</div>
+            </div>
+            <span class="badge" style="font-size: 10px;">Approved</span>
+          </div>
+        `).join('');
+      }
+    } catch (e) {}
+
   } catch (err) {
     hostStatusDot.classList.remove('online');
     hostStatusText.textContent = 'HOST OFFLINE';

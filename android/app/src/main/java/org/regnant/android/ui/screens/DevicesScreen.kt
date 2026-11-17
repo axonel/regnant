@@ -34,7 +34,7 @@ fun DevicesScreen(
 ) {
     var pairingCodeInput by remember { mutableStateOf("") }
     var manualIpInput by remember { mutableStateOf(pairedHost?.ip ?: "100.128.163.153") }
-    var manualPortInput by remember { mutableStateOf((pairedHost?.port ?: 8765).toString()) }
+    var manualPortInput by remember { mutableStateOf((pairedHost?.port ?: 53317).toString()) }
     var isPairingLoading by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -164,7 +164,7 @@ fun DevicesScreen(
 
                 Button(
                     onClick = {
-                        val port = manualPortInput.toIntOrNull() ?: 8765
+                        val port = manualPortInput.toIntOrNull() ?: 53317
                         if (pairingCodeInput.isNotBlank() && manualIpInput.isNotBlank()) {
                             isPairingLoading = true
                             onPairWithHost(manualIpInput.trim(), port, pairingCodeInput.trim())

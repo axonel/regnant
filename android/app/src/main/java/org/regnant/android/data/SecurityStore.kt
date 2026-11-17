@@ -57,7 +57,7 @@ class SecurityStore(context: Context) {
     val hostId = prefs.getString("host_id", null) ?: return null
     val hostName = prefs.getString("host_name", "Regnant Host") ?: "Regnant Host"
     val ip = prefs.getString("host_ip", "127.0.0.1") ?: "127.0.0.1"
-    val port = prefs.getInt("host_port", 8765)
+    val port = prefs.getInt("host_port", 53317)
     val fingerprint = prefs.getString("host_fingerprint", "") ?: ""
     val lastSeen = prefs.getLong("host_last_seen", 0)
 

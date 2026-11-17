@@ -1,5 +1,6 @@
 import https from 'node:https';
-import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { config } from './config.js';
 import { cryptoManager } from './crypto.js';
@@ -8,11 +9,21 @@ import { commandParser } from './parser.js';
 import { actionExecutor } from './executor.js';
 import { notifier } from './notifier.js';
 import { serviceDiscovery } from './discovery.js';
+import { projectManager } from './projects.js';
+import { metricsCollector } from './metrics.js';
+import { fileBrowser } from './filebrowser.js';
+import { transferManager } from './transfer.js';
+import { webManager } from './web.js';
+import { clipboardManager } from './clipboard.js';
+import { powerManager } from './power.js';
+import { appManager } from './appmanager.js';
+import { routineManager } from './routines.js';
 import {
   ACTIONS,
   TARGETS,
   TASK_STATUS,
   WS_EVENTS,
+  CAPABILITIES,
   PROTOCOL_VERSION
 } from '../../../shared/protocol.js';
 
@@ -37,8 +48,9 @@ export class HostServer {
       this.handleUpgrade(request, socket, head);
     });
 
-    this.server.listen(port, '0.0.0.0', () => {
-      console.log(`[Regnant Host] Server listening securely on port ${port} (HTTPS/WSS)`);
+    // Listen on dual-stack '::' to accept IPv6 link-local and IPv4
+    this.server.listen(port, '::', () => {
+      console.log(`[Regnant Host] Server listening securely on port ${port} (HTTPS/WSS, IPv4/IPv6 dual-stack)`);
       console.log(`[Regnant Host] Fingerprint: ${cryptoManager.certFingerprint}`);
       serviceDiscovery.start(port);
       notifier.notify('Regnant', `Host service active on port ${port}`);
@@ -78,9 +90,9 @@ export class HostServer {
   }
 
   authenticateRequest(req) {
-    // If request originates strictly from localhost (e.g. desktop GUI), allow management access
+    // If request originates strictly from localhost (e.g. desktop companion), allow management access
     if (this.isLocalhost(req) && req.headers['x-regnant-local'] === 'true') {
-      return { authenticated: true, deviceId: 'local-desktop', isLocal: true };
+      return { authenticated: true, deviceId: 'local-desktop', deviceName: 'Local Desktop', isLocal: true };
     }
 
     const token = this.extractBearerToken(req);
@@ -120,7 +132,7 @@ export class HostServer {
       let body = '';
       req.on('data', chunk => {
         body += chunk;
-        if (body.length > 1024 * 64) {
+        if (body.length > 1024 * 1024 * 10) { // 10MB limit for general JSON/chunks
           reject(new Error('Request body too large'));
         }
       });
@@ -132,6 +144,15 @@ export class HostServer {
           reject(new Error('Invalid JSON'));
         }
       });
+      req.on('error', reject);
+    });
+  }
+
+  async parseRawBody(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', chunk => chunks.push(chunk));
+      req.on('end', () => resolve(Buffer.concat(chunks)));
       req.on('error', reject);
     });
   }
@@ -150,7 +171,9 @@ export class HostServer {
     const parsedUrl = new URL(req.url, `https://${req.headers.host || 'localhost'}`);
     const pathname = parsedUrl.pathname;
 
-    // Public Health Check
+    // --- Public Endpoints ---
+
+    // 1. Health Check
     if (req.method === 'GET' && pathname === '/api/v1/health') {
       return this.sendJson(res, 200, {
         status: 'ok',
@@ -162,7 +185,7 @@ export class HostServer {
       });
     }
 
-    // Public Pairing Endpoint
+    // 2. Pairing Endpoint
     if (req.method === 'POST' && pathname === '/api/v1/pair') {
       try {
         const body = await this.parseBody(req);
@@ -188,8 +211,6 @@ export class HostServer {
         dbManager.registerDevice(deviceId, deviceName || 'Android Phone', tokenHash);
 
         notifier.pairingCompleted(deviceName);
-
-        // Broadcast to desktop UI
         this.broadcastStateUpdate();
 
         return this.sendJson(res, 200, {
@@ -205,23 +226,23 @@ export class HostServer {
       }
     }
 
-    // Management Endpoint: Generate Pairing Code (localhost or authenticated)
+    // --- Authenticated Management Endpoints ---
+
+    // 3. Generate Pairing Code (localhost only)
     if (req.method === 'POST' && pathname === '/api/v1/pair/code/generate') {
       if (!this.isLocalhost(req)) {
-        return this.sendJson(res, 403, { error: 'Only accessible locally' });
+        return this.sendJson(res, 403, { error: 'Only accessible locally from workstation desktop' });
       }
       const session = cryptoManager.generatePairingCode();
       this.broadcastStateUpdate();
       return this.sendJson(res, 200, session);
     }
 
-    // Management Endpoint: Host status (pairing code, devices, history, apps)
+    // 4. Host Status
     if (req.method === 'GET' && pathname === '/api/v1/status') {
       if (!this.isLocalhost(req)) {
         const auth = this.authenticateRequest(req);
-        if (!auth.authenticated) {
-          return this.sendJson(res, 401, { error: 'Unauthorized' });
-        }
+        if (!auth.authenticated) return this.sendJson(res, 401, { error: 'Unauthorized' });
       }
 
       return this.sendJson(res, 200, {
@@ -233,17 +254,303 @@ export class HostServer {
         devices: dbManager.listDevices(),
         history: dbManager.getHistory(20),
         supportedApplications: actionExecutor.getSupportedApplications(),
+        supportedIdes: projectManager.getSupportedIdes(),
         connectedClientsCount: this.activeClients.size,
       });
     }
 
-    // Command Submission Endpoint
-    if (req.method === 'POST' && pathname === '/api/v1/commands') {
-      const auth = this.authenticateRequest(req);
-      if (!auth.authenticated) {
-        return this.sendJson(res, 401, { status: 'FAILED', reason: auth.reason });
-      }
+    // 5. Authenticate all subsequent endpoints
+    const auth = this.authenticateRequest(req);
+    if (!auth.authenticated) {
+      return this.sendJson(res, 401, { error: auth.reason || 'Unauthorized' });
+    }
 
+    // --- Feature Endpoints ---
+
+    // 6. Laptop Metrics Dashboard
+    if (req.method === 'GET' && pathname === '/api/v1/metrics') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.VIEW_METRICS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: viewing host metrics is restricted' });
+      }
+      return this.sendJson(res, 200, metricsCollector.getSnapshot());
+    }
+
+    // 7. Projects API
+    if (req.method === 'GET' && pathname === '/api/v1/projects') {
+      return this.sendJson(res, 200, {
+        projects: projectManager.listProjects(),
+        supportedIdes: projectManager.getSupportedIdes(),
+      });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/projects/launch') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.PROJECTS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: project launching is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = projectManager.launchProject(body.id, body.ide);
+        notifier.notify('Regnant Project Launched', `${result.project} in ${result.ide}`);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/projects/register') {
+      try {
+        const body = await this.parseBody(req);
+        const result = projectManager.registerProject(body.name, body.path, body.ide);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/projects/delete') {
+      try {
+        const body = await this.parseBody(req);
+        const result = projectManager.deleteProject(body.id);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 8. Remote File Browser API
+    if (req.method === 'GET' && pathname === '/api/v1/files') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSE_FILES)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: file browsing is restricted' });
+      }
+      try {
+        const dirPath = parsedUrl.searchParams.get('path');
+        const listing = fileBrowser.listDirectory(dirPath);
+        return this.sendJson(res, 200, listing);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/files/read') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.BROWSE_FILES)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: file reading is restricted' });
+      }
+      try {
+        const targetPath = parsedUrl.searchParams.get('path');
+        const fileData = fileBrowser.readFileContent(targetPath);
+        return this.sendJson(res, 200, fileData);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 9. File Transfer API
+    if (req.method === 'POST' && pathname === '/api/v1/transfer/init') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.TRANSFER_FILES)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: file transfer is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = transferManager.initUpload(body.fileName, body.fileSize, body.sha256);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/transfer/chunk') {
+      try {
+        const transferId = req.headers['x-transfer-id'];
+        if (!transferId) return this.sendJson(res, 400, { error: 'Missing x-transfer-id header' });
+
+        const rawChunk = await this.parseRawBody(req);
+        const result = transferManager.appendChunk(transferId, rawChunk);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/transfer/finalize') {
+      try {
+        const body = await this.parseBody(req);
+        const result = await transferManager.finalizeUpload(body.transferId);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/transfer/download') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.TRANSFER_FILES)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: file transfer is restricted' });
+      }
+      try {
+        const targetPath = parsedUrl.searchParams.get('path');
+        const info = transferManager.getDownloadInfo(targetPath);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': info.fileSize,
+          'Content-Disposition': `attachment; filename="${info.fileName}"`,
+          'X-Checksum-SHA256': info.sha256,
+        });
+
+        const stream = fs.createReadStream(info.path);
+        stream.pipe(res);
+        return;
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 10. Web & Search API
+    if (req.method === 'POST' && pathname === '/api/v1/web/open') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.OPEN_WEB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: web browser controls are restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = webManager.openUrl(body.url);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/web/search') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.OPEN_WEB)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: web browser controls are restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = webManager.searchWeb(body.query);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 11. Clipboard API
+    if (req.method === 'GET' && pathname === '/api/v1/clipboard') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.CLIPBOARD)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: clipboard access is restricted' });
+      }
+      try {
+        const result = await clipboardManager.readClipboard();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/clipboard') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.CLIPBOARD)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: clipboard access is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await clipboardManager.writeClipboard(body.text || '');
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    // 12. Running Application Manager API
+    if (req.method === 'GET' && pathname === '/api/v1/apps') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.RUNNING_APPS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: application management is restricted' });
+      }
+      try {
+        const apps = await appManager.listRunningApps();
+        return this.sendJson(res, 200, { apps });
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/apps/close') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.RUNNING_APPS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: application management is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await appManager.closeWindow(body.address);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 13. Power & Lock Controls API
+    if (req.method === 'POST' && pathname === '/api/v1/power/lock') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.POWER_CONTROLS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: power controls are restricted' });
+      }
+      try {
+        const result = await powerManager.lockSession();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/power/suspend') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.POWER_CONTROLS)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: power controls are restricted' });
+      }
+      try {
+        const result = await powerManager.suspendSystem();
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 500, { error: err.message });
+      }
+    }
+
+    // 14. Routines API
+    if (req.method === 'GET' && pathname === '/api/v1/routines') {
+      return this.sendJson(res, 200, { routines: routineManager.listRoutines() });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/routines/execute') {
+      if (!dbManager.isPermissionAllowed(auth.deviceId, CAPABILITIES.ROUTINES)) {
+        return this.sendJson(res, 403, { error: 'Permission denied: routine execution is restricted' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        const result = await routineManager.executeRoutine(body.routineId);
+        return this.sendJson(res, 200, result);
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 15. Permissions Matrix API
+    if (req.method === 'GET' && pathname === '/api/v1/permissions') {
+      const targetDevice = parsedUrl.searchParams.get('deviceId') || auth.deviceId;
+      return this.sendJson(res, 200, {
+        deviceId: targetDevice,
+        permissions: dbManager.getPermissions(targetDevice),
+      });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/permissions') {
+      // Modifying permissions requires local desktop access
+      if (!auth.isLocal) {
+        return this.sendJson(res, 403, { error: 'Modifying permissions is only allowed directly on workstation desktop' });
+      }
+      try {
+        const body = await this.parseBody(req);
+        dbManager.setPermission(body.deviceId, body.capability, body.allowed);
+        return this.sendJson(res, 200, { success: true });
+      } catch (err) {
+        return this.sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // 16. Command Submission Endpoint (Core execution)
+    if (req.method === 'POST' && pathname === '/api/v1/commands') {
       try {
         const body = await this.parseBody(req);
         const result = await this.processCommand(auth.deviceId, body);
@@ -253,32 +560,19 @@ export class HostServer {
       }
     }
 
-    // Devices List Endpoint
+    // 17. Device Management & History
     if (req.method === 'GET' && pathname === '/api/v1/devices') {
-      const auth = this.authenticateRequest(req);
-      if (!auth.authenticated) {
-        return this.sendJson(res, 401, { error: 'Unauthorized' });
-      }
       return this.sendJson(res, 200, { devices: dbManager.listDevices() });
     }
 
-    // Device Revocation Endpoint
     if (req.method === 'POST' && pathname === '/api/v1/devices/revoke') {
-      const auth = this.authenticateRequest(req);
-      if (!auth.authenticated) {
-        return this.sendJson(res, 401, { error: 'Unauthorized' });
-      }
-
       try {
         const body = await this.parseBody(req);
         const { deviceId } = body;
-        if (!deviceId) {
-          return this.sendJson(res, 400, { error: 'Missing deviceId' });
-        }
+        if (!deviceId) return this.sendJson(res, 400, { error: 'Missing deviceId' });
 
         dbManager.revokeDevice(deviceId);
 
-        // Terminate any live WebSocket connections for this revoked device
         for (const [ws, client] of this.activeClients.entries()) {
           if (client.deviceId === deviceId) {
             ws.close(4001, 'Device revoked');
@@ -293,12 +587,7 @@ export class HostServer {
       }
     }
 
-    // History Endpoint
     if (req.method === 'GET' && pathname === '/api/v1/history') {
-      const auth = this.authenticateRequest(req);
-      if (!auth.authenticated) {
-        return this.sendJson(res, 401, { error: 'Unauthorized' });
-      }
       return this.sendJson(res, 200, { history: dbManager.getHistory(50) });
     }
 
@@ -330,7 +619,7 @@ export class HostServer {
     let finalAction = action;
     let finalTarget = target;
 
-    // If natural language phrase provided, parse deterministically
+    // Parse natural language if provided
     if (rawCommand) {
       const parseResult = commandParser.parse(rawCommand);
       if (!parseResult.valid) {
@@ -369,6 +658,33 @@ export class HostServer {
       };
     }
 
+    // Capability permission check
+    let requiredCap = CAPABILITIES.LAUNCH_APPS;
+    if (finalAction === ACTIONS.OPEN_PATH) requiredCap = CAPABILITIES.OPEN_PATHS;
+    if (finalAction === ACTIONS.PROJECT_LAUNCH || finalAction === ACTIONS.PROJECT_LIST) requiredCap = CAPABILITIES.PROJECTS;
+    if (finalAction === ACTIONS.GET_METRICS) requiredCap = CAPABILITIES.VIEW_METRICS;
+    if (finalAction === ACTIONS.CLIPBOARD_READ || finalAction === ACTIONS.CLIPBOARD_WRITE) requiredCap = CAPABILITIES.CLIPBOARD;
+    if (finalAction === ACTIONS.POWER_LOCK || finalAction === ACTIONS.POWER_SUSPEND) requiredCap = CAPABILITIES.POWER_CONTROLS;
+    if (finalAction === ACTIONS.APPS_LIST || finalAction === ACTIONS.APPS_CLOSE) requiredCap = CAPABILITIES.RUNNING_APPS;
+    if (finalAction === ACTIONS.ROUTINE_EXECUTE) requiredCap = CAPABILITIES.ROUTINES;
+    if (finalAction === ACTIONS.WEB_SEARCH || finalAction === ACTIONS.OPEN_URL) requiredCap = CAPABILITIES.OPEN_WEB;
+
+    if (!dbManager.isPermissionAllowed(deviceId, requiredCap)) {
+      const reason = `Permission denied: device does not have permission for capability "${requiredCap}"`;
+      dbManager.recordCommand({
+        requestId,
+        deviceId,
+        action: finalAction,
+        target: finalTarget,
+        rawCommand: rawCommand || `${finalAction} ${finalTarget}`,
+        status: TASK_STATUS.REJECTED,
+        message: reason,
+        timestamp: now,
+        executedAt: now,
+      });
+      return { success: false, requestId, status: TASK_STATUS.REJECTED, reason };
+    }
+
     // Record initial received status
     dbManager.recordCommand({
       requestId,
@@ -383,8 +699,41 @@ export class HostServer {
 
     this.broadcastCommandStatus(requestId, TASK_STATUS.RUNNING, 'Executing action...');
 
-    // Execute through strict allowlist executor
-    const execResult = await actionExecutor.execute(finalAction, finalTarget);
+    let execResult = null;
+
+    try {
+      if (finalAction === ACTIONS.LAUNCH_APP || finalAction === ACTIONS.OPEN_PATH) {
+        execResult = await actionExecutor.execute(finalAction, finalTarget);
+      } else if (finalAction === ACTIONS.PROJECT_LAUNCH) {
+        execResult = projectManager.launchProject(finalTarget);
+      } else if (finalAction === ACTIONS.PROJECT_LIST) {
+        execResult = { success: true, message: `Projects: ${projectManager.listProjects().map(p => p.name).join(', ')}` };
+      } else if (finalAction === ACTIONS.GET_METRICS) {
+        const snap = metricsCollector.getSnapshot();
+        execResult = { success: true, message: `CPU: ${snap.cpuPercent}% | RAM: ${snap.memory.percent}% | Bat: ${snap.battery.percent}%` };
+      } else if (finalAction === ACTIONS.CLIPBOARD_READ) {
+        const clip = await clipboardManager.readClipboard();
+        execResult = { success: true, message: `Clipboard: "${clip.text.slice(0, 40)}..."` };
+      } else if (finalAction === ACTIONS.POWER_LOCK) {
+        execResult = await powerManager.lockSession();
+      } else if (finalAction === ACTIONS.POWER_SUSPEND) {
+        execResult = await powerManager.suspendSystem();
+      } else if (finalAction === ACTIONS.APPS_LIST) {
+        const apps = await appManager.listRunningApps();
+        execResult = { success: true, message: `Open apps: ${apps.map(a => a.appClass).join(', ')}` };
+      } else if (finalAction === ACTIONS.ROUTINE_EXECUTE) {
+        execResult = await routineManager.executeRoutine(finalTarget);
+      } else if (finalAction === ACTIONS.WEB_SEARCH) {
+        execResult = webManager.searchWeb(finalTarget);
+      } else if (finalAction === ACTIONS.OPEN_URL) {
+        execResult = webManager.openUrl(finalTarget);
+      } else {
+        execResult = { success: false, error: `Unhandled action: ${finalAction}` };
+      }
+    } catch (err) {
+      execResult = { success: false, error: err.message };
+    }
+
     const executedAt = Date.now();
 
     if (execResult.success) {
@@ -486,6 +835,14 @@ export class HostServer {
           ws.send(JSON.stringify({
             type: WS_EVENTS.COMMAND_STATUS,
             data: result,
+          }));
+          return;
+        }
+
+        if (message.type === 'GET_METRICS') {
+          ws.send(JSON.stringify({
+            type: WS_EVENTS.METRICS_UPDATE,
+            data: metricsCollector.getSnapshot(),
           }));
           return;
         }

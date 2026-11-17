@@ -30,7 +30,7 @@ class RegnantApp : Application() {
     override fun onCreate() {
         super.onCreate()
         securityStore = SecurityStore(this)
-        client = RegnantClient(securityStore)
+        client = RegnantClient(this, securityStore)
         nsdDiscovery = NsdDiscovery(this)
 
         createNotificationChannels()
@@ -40,9 +40,9 @@ class RegnantApp : Application() {
         if (pairedHost != null && securityStore.isAutoReconnectEnabled()) {
             client.connect()
 
-            // Also start NSD to track dynamic IP changes on local Wi-Fi
+            // Also start NSD to track dynamic IP/port changes on local Wi-Fi
             nsdDiscovery.startDiscovery { host ->
-                if (host.hostId == pairedHost.hostId && host.ip != pairedHost.ip && pairedHost.ip != "127.0.0.1") {
+                if (host.hostId == pairedHost.hostId && (host.ip != pairedHost.ip || host.port != pairedHost.port)) {
                     securityStore.updateHostIpAndPort(host.ip, host.port)
                     client.connect()
                 }

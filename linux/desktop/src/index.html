@@ -18,6 +18,11 @@
         </div>
       </div>
       <div class="header-status">
+        <div class="telemetry-bar" id="telemetryBar" style="display: flex; gap: 12px; margin-right: 12px; font-size: 11px; font-family: monospace; color: var(--accent-leaf);">
+          <span id="metricBattery">🔋 --%</span>
+          <span id="metricCpu">⚡ CPU --%</span>
+          <span id="metricRam">💾 RAM --%</span>
+        </div>
         <span class="status-indicator" id="hostStatusDot"></span>
         <span class="status-label" id="hostStatusText">CONNECTING...</span>
       </div>
@@ -46,10 +51,25 @@
         <div class="devices-list" id="devicesList">
           <div class="empty-state">No paired devices yet</div>
         </div>
+
+        <div class="panel-header" style="margin-top: 24px;">
+          <h2 class="panel-title">APPROVED FILE ROOTS</h2>
+        </div>
+        <div class="roots-list" id="rootsList">
+          <div class="empty-state">Loading approved roots...</div>
+        </div>
       </section>
 
       <!-- Right Column: Host & Execution History -->
       <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">REGISTERED WORKSPACES</h2>
+          <span class="badge" id="projectCount">0 workspaces</span>
+        </div>
+        <div class="projects-list" id="projectsList" style="max-height: 160px; overflow-y: auto; margin-bottom: 20px;">
+          <div class="empty-state">Loading project workspaces...</div>
+        </div>
+
         <div class="panel-header">
           <h2 class="panel-title">SUPPORTED APPLICATIONS</h2>
         </div>
@@ -67,12 +87,12 @@
             <span class="app-exec" id="appFiles">nautilus</span>
           </div>
           <div class="app-card">
-            <span class="app-name">Calculator</span>
-            <span class="app-exec" id="appCalc">omacalc</span>
+            <span class="app-name">Projects</span>
+            <span class="app-exec" id="appCalc">auto</span>
           </div>
         </div>
 
-        <div class="panel-header" style="margin-top: 24px;">
+        <div class="panel-header" style="margin-top: 20px;">
           <h2 class="panel-title">RECENT COMMANDS</h2>
           <span class="badge" id="historyCount">0 entries</span>
         </div>
@@ -85,8 +105,8 @@
     <!-- Bottom Footer Status -->
     <footer class="footer">
       <div class="footer-meta">
-        <span>Port: <strong id="metaPort">8765</strong></span>
-        <span>Protocol: <strong id="metaVersion">1.0.0</strong></span>
+        <span>Port: <strong id="metaPort">53317</strong></span>
+        <span>Protocol: <strong id="metaVersion">1.1.0</strong></span>
         <span>TLS Fingerprint: <code id="metaFingerprint">Calculating...</code></span>
       </div>
       <button class="btn btn-sm btn-outline" id="btnRestartHost">Refresh Service</button>

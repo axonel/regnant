@@ -6,7 +6,7 @@ export class CommandParser {
    * Rejects any unrecognized or arbitrary shell patterns.
    *
    * @param {string} text - User command (voice transcript or typed input)
-   * @returns {{ valid: boolean, action?: string, target?: string, reason?: string }}
+   * @returns {{ valid: boolean, action?: string, target?: string, payload?: any, reason?: string }}
    */
   parse(text) {
     if (!text || typeof text !== 'string') {
@@ -38,6 +38,28 @@ export class CommandParser {
           reason: 'Command rejected: arbitrary shell and destructive commands are not permitted.'
         };
       }
+    }
+
+    // Web search pattern: "search <query>", "google <query>", "look up <query>"
+    if (clean.startsWith('search ') || clean.startsWith('google ') || clean.startsWith('look up ')) {
+      const query = clean.replace(/^(search|google|look up)\s+/, '').trim();
+      if (query) {
+        return { valid: true, action: ACTIONS.WEB_SEARCH, target: query };
+      }
+    }
+
+    // Projects launcher patterns
+    if (
+      clean === 'projects' ||
+      clean === 'project' ||
+      clean === 'open projects' ||
+      clean === 'launch projects' ||
+      clean === 'show projects' ||
+      clean === 'workspaces' ||
+      clean === 'open workspaces' ||
+      clean === 'my projects'
+    ) {
+      return { valid: true, action: ACTIONS.PROJECT_LIST, target: TARGETS.PROJECTS };
     }
 
     // Terminal patterns
@@ -131,9 +153,78 @@ export class CommandParser {
       return { valid: true, action: ACTIONS.OPEN_PATH, target: TARGETS.HOME };
     }
 
+    // Status / Metrics patterns
+    if (
+      clean === 'status' ||
+      clean === 'laptop status' ||
+      clean === 'system status' ||
+      clean === 'battery' ||
+      clean === 'battery status' ||
+      clean === 'cpu' ||
+      clean === 'metrics' ||
+      clean === 'stats'
+    ) {
+      return { valid: true, action: ACTIONS.GET_METRICS, target: 'host' };
+    }
+
+    // Clipboard patterns
+    if (
+      clean === 'clipboard' ||
+      clean === 'read clipboard' ||
+      clean === 'copy clipboard' ||
+      clean === 'get clipboard' ||
+      clean === 'laptop clipboard'
+    ) {
+      return { valid: true, action: ACTIONS.CLIPBOARD_READ, target: 'system' };
+    }
+
+    // Lock session patterns
+    if (
+      clean === 'lock' ||
+      clean === 'lock screen' ||
+      clean === 'lock laptop' ||
+      clean === 'lock workstation' ||
+      clean === 'lock session'
+    ) {
+      return { valid: true, action: ACTIONS.POWER_LOCK, target: 'session' };
+    }
+
+    // Suspend patterns
+    if (
+      clean === 'suspend' ||
+      clean === 'sleep' ||
+      clean === 'suspend laptop' ||
+      clean === 'suspend workstation' ||
+      clean === 'put laptop to sleep'
+    ) {
+      return { valid: true, action: ACTIONS.POWER_SUSPEND, target: 'system' };
+    }
+
+    // Running apps patterns
+    if (
+      clean === 'running apps' ||
+      clean === 'open apps' ||
+      clean === 'open windows' ||
+      clean === 'windows' ||
+      clean === 'tasks' ||
+      clean === 'show running apps'
+    ) {
+      return { valid: true, action: ACTIONS.APPS_LIST, target: 'all' };
+    }
+
+    // Routines patterns
+    if (
+      clean === 'start work' ||
+      clean === 'start work session' ||
+      clean === 'work session' ||
+      clean === 'begin work'
+    ) {
+      return { valid: true, action: ACTIONS.ROUTINE_EXECUTE, target: 'routine-start-work' };
+    }
+
     return {
       valid: false,
-      reason: `Unsupported command: "${text}". Supported actions: open terminal, open brave, open files, open calculator, open downloads, open home folder.`
+      reason: `Unsupported command: "${text}". Supported: open terminal, open brave, open files, open projects, open downloads, laptop status, lock screen, running apps, start work.`
     };
   }
 }

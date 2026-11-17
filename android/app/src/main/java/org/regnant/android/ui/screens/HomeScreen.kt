@@ -1,7 +1,9 @@
 package org.regnant.android.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,27 +12,30 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import org.regnant.android.data.CommandRecord
 import org.regnant.android.data.ConnectionStatus
 import org.regnant.android.data.HostIdentity
+import org.regnant.android.data.HostMetrics
+import org.regnant.android.network.RegnantClient
 import org.regnant.android.ui.components.QuickActionChips
 import org.regnant.android.ui.components.StatusHeader
 import org.regnant.android.ui.components.VoiceInputButton
@@ -38,15 +43,34 @@ import org.regnant.android.ui.theme.*
 
 @Composable
 fun HomeScreen(
+    client: RegnantClient,
     pairedHost: HostIdentity?,
     connectionStatus: ConnectionStatus,
     recentCommands: List<CommandRecord>,
     onSendCommand: (String) -> Unit,
     onNavigateToPairing: () -> Unit,
+    onNavigateToProjects: () -> Unit,
+    onNavigateToDashboard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var commandText by remember { mutableStateOf("") }
     val isConnected = connectionStatus == ConnectionStatus.CONNECTED
+
+    var metrics by remember { mutableStateOf<HostMetrics?>(null) }
+    var showLockDialog by remember { mutableStateOf(false) }
+
+    // Lightweight telemetry polling on home screen
+    LaunchedEffect(connectionStatus) {
+        if (connectionStatus == ConnectionStatus.CONNECTED) {
+            while (isActive) {
+                val res = client.getMetrics()
+                if (res.isSuccess) metrics = res.getOrNull()
+                delay(8000) // Poll every 8s on home screen
+            }
+        }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -68,10 +92,59 @@ fun HomeScreen(
                 UnpairedCard(onNavigateToPairing = onNavigateToPairing)
             }
         } else {
+            // Live Mini Hardware Telemetry Banner
+            if (isConnected && metrics != null) {
+                item {
+                    val m = metrics!!
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceCard)
+                            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+                            .clickable(onClick = onNavigateToDashboard)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (m.battery.isCharging) Icons.Default.BatteryChargingFull else Icons.Default.BatteryFull,
+                                contentDescription = null,
+                                tint = if (m.battery.percent > 20) StatusGreen else StatusRed,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("${m.battery.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Memory, contentDescription = null, tint = Coral, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("CPU ${m.cpuPercent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.DeveloperBoard, contentDescription = null, tint = Leaf, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("RAM ${m.memory.percent}%", fontSize = 11.sp, color = Candle, fontFamily = FontFamily.Monospace)
+                        }
+
+                        IconButton(
+                            onClick = { showLockDialog = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = "Lock", tint = Coral, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
             item {
                 QuickActionChips(
                     enabled = isConnected,
-                    onActionClick = { onSendCommand(it) }
+                    onActionClick = { onSendCommand(it) },
+                    onNavigateToProjects = onNavigateToProjects
                 )
             }
 
@@ -127,6 +200,31 @@ fun HomeScreen(
         item {
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    if (showLockDialog) {
+        AlertDialog(
+            onDismissRequest = { showLockDialog = false },
+            containerColor = SurfaceCard,
+            title = { Text("Lock Workstation?", color = Candle, fontWeight = FontWeight.Bold) },
+            text = { Text("Lock your Linux desktop session immediately.", color = TextMuted) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLockDialog = false
+                        coroutineScope.launch {
+                            val res = client.lockWorkstation()
+                            if (res.isSuccess) Toast.makeText(context, "Workstation locked!", Toast.LENGTH_SHORT).show()
+                            else Toast.makeText(context, "Lock failed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Coral)
+                ) { Text("Lock", color = Candle, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLockDialog = false }) { Text("Cancel", color = TextMuted) }
+            }
+        )
     }
 }
 

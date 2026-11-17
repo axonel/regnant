@@ -25,7 +25,7 @@ function queryHost(endpoint, method = 'GET', body = null) {
     const postData = body ? JSON.stringify(body) : null;
     const req = https.request({
       hostname: '127.0.0.1',
-      port: 8765,
+      port: 53317,
       path: endpoint,
       method,
       rejectUnauthorized: false,
@@ -175,6 +175,34 @@ app.whenReady().then(() => {
   ipcMain.handle('restart-host', async () => {
     ensureHostRunning();
     return { ok: true };
+  });
+
+  ipcMain.handle('get-metrics', async () => {
+    return await queryHost('/api/v1/metrics');
+  });
+
+  ipcMain.handle('get-projects', async () => {
+    return await queryHost('/api/v1/projects');
+  });
+
+  ipcMain.handle('get-roots', async () => {
+    return await queryHost('/api/v1/files/roots');
+  });
+
+  ipcMain.handle('get-permissions', async (event, deviceId) => {
+    return await queryHost(`/api/v1/permissions?deviceId=${encodeURIComponent(deviceId)}`);
+  });
+
+  ipcMain.handle('set-permission', async (event, payload) => {
+    return await queryHost('/api/v1/permissions', 'POST', payload);
+  });
+
+  ipcMain.handle('get-pending-approvals', async () => {
+    return await queryHost('/api/v1/approvals/pending');
+  });
+
+  ipcMain.handle('respond-approval', async (event, payload) => {
+    return await queryHost('/api/v1/approvals/respond', 'POST', payload);
   });
 
   ipcMain.handle('close-window', () => {
