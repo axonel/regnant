@@ -3,7 +3,7 @@
 ## Toolchain
 
 - Node.js 26 with npm for the Linux host service.
-- JDK 21 and Android SDK API 36 for the Android application.
+- Android: JDK 21, SDK API 36, Android Gradle Plugin 8.13.2, Gradle wrapper 8.14.4 and Kotlin 2.4.21.
 - A Linux desktop session for platform-specific integration work.
 
 ## Host
