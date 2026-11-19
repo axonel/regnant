@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant A as Android client
+  participant H as Regnant host
+  participant DB as Host SQLite
+  A->>H: Discover or select host
+  H-->>A: Host address and certificate
+  Note over A,H: User enters host-displayed short-lived pairing code
+  A->>H: Pair request over TLS
+  H->>H: Validate expiry, attempts and single-use state
+  H->>DB: Store device identity and token hash
+  H-->>A: Device token and host identity
+  A->>A: Persist credential using encrypted storage
+  A->>H: Authenticated HTTPS/WSS request
+  H->>DB: Verify device and capability
+  H-->>A: Result or event stream

@@ -34,14 +34,47 @@ test('GitManager — repository validation, status, branches, commits, diff', ()
   assert.equal(typeof diff.diff, 'string');
 });
 
-test('GitHubManager — authenticated state check and safe remote error handling', () => {
-  const gh = new GitHubManager();
+test('GitHubManager — parses authenticated state and handles missing remotes', () => {
+  const gh = new GitHubManager({
+    runCommand(_command, args) {
+      if (args[0] === 'auth') {
+        return "Logged in to github.com account roonakyadav (keyring)\nToken scopes: 'repo, workflow'";
+      }
+      const error = new Error('no git remotes');
+      error.stderr = 'fatal: no git remotes found';
+      throw error;
+    },
+  });
+
   const auth = gh.checkAuth();
   assert.equal(auth.authenticated, true);
   assert.equal(auth.user, 'roonakyadav');
-  assert.ok(auth.scopes.includes('repo'));
+  assert.deepEqual(auth.scopes, ['repo', 'workflow']);
 
-  // Since local regnant clone has no remote yet, listPullRequests should gracefully return error object
   const prs = gh.listPullRequests(PROJECT_ROOT, 5);
-  assert.ok(prs.error || Array.isArray(prs));
+  assert.equal(prs.error, 'No GitHub remotes found for this repository');
+});
+
+test('GitHubManager — reports unauthenticated and missing CLI states without crashing', () => {
+  const gh = new GitHubManager({
+    runCommand() {
+      const error = new Error('spawn gh ENOENT');
+      error.code = 'ENOENT';
+      throw error;
+    },
+  });
+
+  assert.deepEqual(gh.checkAuth(), {
+    authenticated: false,
+    user: null,
+    scopes: [],
+  });
+  assert.equal(
+    gh.listPullRequests(PROJECT_ROOT, 5).error,
+    'GitHub CLI (gh) is not installed on this host',
+  );
+  assert.equal(
+    gh.listWorkflowRuns(PROJECT_ROOT, 5).error,
+    'GitHub CLI (gh) is not installed on this host',
+  );
 });

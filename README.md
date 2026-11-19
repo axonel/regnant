@@ -1,181 +1,229 @@
-# REGNANT (v1.2.2)
+<div align="center">
 
-> Personal mobile control plane for Omarchy Linux workstation.
+<img src="assets/icon-512.png" alt="Regnant icon" width="112" />
 
-Regnant connects an Android smartphone directly to a Linux laptop over the local network. It operates without external cloud dependencies, without AI models at runtime, without public relays, and without QR codes.
+# Regnant
 
-```
-       +------------------------------------+
-       |          REGNANT ANDROID           |
-       |  Native Kotlin + Jetpack Compose   |
-       |  Android Keystore AES-GCM          |
-       |  Scoped Wi-Fi DNS (RegnantDns)     |
-       +------------------------------------+
-                         │
-             TLS 1.3 / Authenticated WSS
-          Local Wi-Fi mDNS (_regnant._tcp)
-               Dual-Stack Port 53317
-                         │
-       +------------------------------------+
-       |            REGNANT HOST            |
-       |  Node.js Daemon (port 53317)       |
-       |  SQLite + Strict Non-Shell Engine  |
-       |  Hardware Telemetry Streamer       |
-       +------------------------------------+
-                         │
-             Wayland Session IPC & Sockets
-       +------------------------------------+
-       |          LINUX WORKSTATION         |
-       |  Foot, Brave, Nautilus, Hyprland,  |
-       |  VS Code, Antigravity, Systemd     |
-       +------------------------------------+
-```
+### An Android control plane for your Linux desktop.
+
+Control workspaces, developer tools and selected desktop operations from your phone over your local network.
+
+[Architecture](docs/ARCHITECTURE.md) · [Installation](docs/INSTALLATION.md) · [Security](docs/SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Known limitations](docs/KNOWN_LIMITATIONS.md)
+
+![Linux](https://img.shields.io/badge/Linux-Omarchy%20%2F%20Hyprland-343723?logo=linux&logoColor=white)
+![Android](https://img.shields.io/badge/Android-29%2B-898861?logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7D2826?logo=kotlin&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-26-343723?logo=nodedotjs&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-EFE9D7)
+
+</div>
 
 ---
 
-## What's New in v1.2.2
+## Overview
 
-- **Remote Laptop Unlock via Omarchy PAM**: Authenticate and unlock the Linux workstation remotely from Android using the actual Linux user login password. Integrates with Omarchy's existing `/etc/pam.d/omarchy-lock-password` PAM pipeline via user-space Quickshell plugin IPC.
-- **Stateful Lock & Unlock UI**: Replaced single lock button with dynamic dual controls on the Android Home screen. When locked, displays a high-visibility `[🔒 LOCKED]` badge alongside an `[🔓 Unlock Laptop]` button.
-- **Masked Password Dialog & Instant Wiping**: Clean modal dialog with `PasswordVisualTransformation`, eye icon toggle, and immediate memory erasure on submit (`password = ""`). Zero persistence in SQLite, SharedPreferences, or logs.
-- **Direct UNIX Domain Socket Transport**: Communication between the Regnant daemon and Omarchy Quickshell occurs over `/run/user/1000/omarchy-shell-*.sock`, avoiding command-line argument inspection (`ps aux`).
-- **Comprehensive State Feedback**: Real-time validation and feedback: `UNLOCKING` (PAM verification in progress), `UNLOCKED` (success), `INVALID PASSWORD` (PAM authentication failure), and `HOST UNAVAILABLE`.
+Regnant pairs an Android application with a user-session service on a Linux workstation. The phone becomes a remote control surface for selected system operations and developer workflows.
 
----
+The design is **local-first**: the normal control path uses a direct local-network connection between the phone and laptop. Regnant does not require an AI API key or a cloud relay for its core control path.
 
-## What's New in v1.2.1
+The strongest current integration target is **Omarchy Linux with Hyprland and Wayland**. Some features depend on the desktop session and tools installed on the host.
 
-- **Animated Hyprland Workspace Selector**: Prominently placed on Android Home screen (`1 — 2 — 3 — 4 — 5`) with smooth spring-based sliding indicator, supporting touch taps and horizontal drag gestures. Event-driven bi-directional synchronization directly bound to Hyprland's UNIX domain event socket (`.socket2.sock`) and Omarchy Lua dispatchers (`o.workspaces.focus`). Out-of-range workspaces (e.g. > 5) are cleanly flagged without falsely highlighting slot 5.
-- **Dedicated "Lock Laptop" Control**: Replaced ambiguous lock controls with a prominent, high-contrast "Lock Laptop" button on Android. Tapping opens an explicit confirmation dialog identifying the target machine (`Lock electron (Omarchy)?`) and stating the physical password/fingerprint requirement. Executes Omarchy's native `/usr/share/omarchy/bin/omarchy-system-lock` and reports `"Laptop locked"` status.
+## Screenshots
 
----
+The following screenshots are captured from the running Android application.
 
-## What's New in v1.1.0
+| Home and device status | Workspace selector |
+|---|---|
+| ![Regnant home](assets/v1.2.1/01-home-screen-workspace-selector.png) | ![Workspace selector](assets/v1.2.1/05-phone-tap-switch-ws5.png) |
 
-- **P0 Real Wi-Fi & AP-Isolation Bypass**: Permanent removal of ADB reverse. Resolved AP client isolation using dual-stack IPv6 link-local multicast and `RegnantDns` scoped resolution.
-- **Project Launcher**: Replaced Calculator quick action with a full development workspace launcher for `~/Projects` with automatic IDE detection (`code`, `antigravity`, `foot -D`).
-- **Live Hardware Telemetry**: Real-time streaming of laptop Battery %, CPU utilization (`/proc/stat`), RAM allocation (`/proc/meminfo`), Home Storage, and Uptime.
-- **Remote File Browser & Text Preview**: Browse authorized directories (`~/Projects`, `~/Downloads`) with in-app syntax preview and directory traversal sandboxing.
-- **Manual Clipboard Sync**: User-initiated fetch and push of Wayland clipboard via `wl-paste` and `wl-copy`. Zero background polling.
-- **Hardware & Power Safety**: One-tap session locking (`loginctl lock-session`) and suspend (`systemctl suspend`) with mobile confirmation alerts; approval-gated shutdown/reboot.
-- **Granular Permissions Matrix**: SQLite-backed capability permissions allowing fine-grained revocation per device.
+| Developer control centre | Persistent terminal |
+|---|---|
+| ![Developer centre](assets/v1.2/screenshot-02-agents.png) | ![Terminal](assets/v1.2/screenshot-07-terminal-executed.png) |
 
----
+| Git cockpit | Desktop peek |
+|---|---|
+| ![Git cockpit](assets/v1.2/screenshot-17-git-cockpit.png) | ![Desktop peek](assets/v1.2/screenshot-21-desktop-peek.png) |
 
-## Color Palette & Sovereign Command Aesthetic
+| Search | Automations |
+|---|---|
+| ![Search](assets/v1.2/screenshot-24-search-results.png) | ![Automation rules](assets/v1.2/screenshot-28-rule-created.png) |
 
-Designed strictly following the Sovereign Command palette:
+## Current capabilities
 
-| Color Name | Hexadecimal | Usage |
-|---|---|---|
-| **Main Background** | `#0C0F14` | Window background & surface base |
-| **Candle** | `#EFE9D7` | Primary text, titles, and icons |
-| **Coral** | `#7D2826` | Primary action buttons & badges |
-| **Leaf** | `#898861` | Secondary accents, labels, and borders |
-| **Juniper** | `#343723` | Cards, chips & subtle containers |
-| **Status Green** | `#4E8E5F` | Active connection indicators |
-| **Status Red** | `#A33C3A` | Warnings, errors, and revocations |
+Capabilities below reflect modules present in the current codebase. Their deployment requirements and verification boundaries are described in [Known limitations](docs/KNOWN_LIMITATIONS.md).
 
----
+| Area | Capability |
+|---|---|
+| Connection | Manual code pairing, host discovery, authenticated local connection and reconnection |
+| Workstation | Live system telemetry, project launcher and Hyprland workspace switching |
+| Lock screen | Lock and Omarchy PAM-backed remote unlock |
+| Files | Read-only file browsing and text preview; transfer support exists in the host implementation |
+| Developer tools | Persistent terminal sessions, agent adapter discovery, Git status and GitHub integration |
+| Desktop | Window/workspace operations, desktop capture and browser bridge components |
+| Media | PipeWire volume and MPRIS media controls |
+| Utility | Host search, Downloads-directory inspection, automation rules and Wake-on-LAN packet sending |
 
-## Project Structure
+Not every listed capability has been verified end-to-end on every supported environment. For example, agent adapters' presence does not mean every CLI's interactive task streaming has been proven, and Wake-on-LAN success depends on firmware and network configuration.
 
-```
-regnant/
-├── android/                         # Native Android Application (Kotlin, Jetpack Compose)
-│   ├── app/src/main/java/org/regnant/android/
-│   │   ├── MainActivity.kt          # 5-Tab Scaffold (Home, Projects, Status, Files, Devices)
-│   │   ├── RegnantApp.kt            # Application lifecycle & background notifications
-│   │   ├── data/                    # SecurityStore (Keystore), Models
-│   │   ├── network/                 # RegnantClient (OkHttp TLS/WSS, RegnantDns), NsdDiscovery
-│   │   └── ui/                      # Screens (Home, Projects, Dashboard, Files, Devices)
-│   └── build.gradle.kts
-├── linux/
-│   ├── host/                        # Background Host Daemon (Node.js 26)
-│   │   ├── src/
-│   │   │   ├── index.js             # CLI Daemon Entrypoint
-│   │   │   ├── server.js            # HTTPS / WSS Server (Port 53317, Dual-Stack)
-│   │   │   ├── parser.js            # Deterministic natural language command parser
-│   │   │   ├── executor.js          # Non-shell application executor (Foot, Brave, Nautilus)
-│   │   │   ├── projects.js          # Workspace detection & IDE launcher
-│   │   │   ├── metrics.js           # Non-blocking hardware telemetry collector
-│   │   │   ├── filebrowser.js       # Directory traversal sandboxing & text preview
-│   │   │   ├── transfer.js          # Chunked streaming upload/download
-│   │   │   ├── clipboard.js         # Wayland clipboard bridge (wl-paste, wl-copy)
-│   │   │   ├── power.js             # Session lock, suspend, approval-gated shutdown
-│   │   │   ├── appmanager.js        # Hyprland window client manager
-│   │   │   ├── routines.js          # Pre-packaged multi-step automation routines
-│   │   │   ├── crypto.js            # TLS certs, 6-char pairing code, SHA-256 tokens
-│   │   │   ├── db.js                # SQLite device registry, history & permissions
-│   │   │   ├── discovery.js         # Avahi / DNS-SD service announcement
-│   │   │   └── notifier.js          # Native desktop notifications via notify-send
-│   │   └── test/                    # Unit, expansion, and integration test suites
-│   ├── desktop/                     # Electron 42 Desktop GUI
-│   │   └── src/                     # main.js, preload.js, index.html, styles.css, renderer.js
-│   └── scripts/
-│       ├── install.sh               # User-level systemd service & desktop launcher installer
-│       └── uninstall.sh             # Clean uninstaller
-├── assets/                          # Original SVG, rasterized PNG icons, and UI screenshots
-└── docs/                            # In-depth architectural & testing documentation
-    ├── environment-audit.md         # Full audit of Omarchy, Hyprland & Android device
-    ├── implementation-audit.md      # Wi-Fi diagnostics, firewall analysis & architecture
-    ├── networking.md                # Dual-stack mDNS, UFW port 53317, AP isolation & RegnantDns
-    ├── projects.md                  # Project launcher & workspace execution specification
-    ├── file-transfers.md            # File browser, sandboxing & chunked transfer protocol
-    ├── permissions.md               # Capability matrix & consequential approval workflow
-    ├── security.md                  # Cryptographic model, Keystore storage & token lifecycle
-    ├── remote-unlock.md             # Remote Omarchy PAM unlock, UNIX socket IPC & security model
-    └── testing.md                   # Full test results, physical device verification & evidence
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph Android["Android application"]
+    UI["Jetpack Compose UI"]
+    CLIENT["TLS and WebSocket client"]
+    STORE["Encrypted credential storage"]
+    UI --> CLIENT
+    CLIENT <--> STORE
+  end
+  DISC["mDNS / DNS-SD discovery"]
+  subgraph Linux["Linux host service"]
+    API["HTTPS and WebSocket API"]
+    AUTH["Device authentication and capability checks"]
+    DB[("SQLite")]
+    MANAGERS["Operation-specific managers"]
+    API --> AUTH
+    AUTH <--> DB
+    AUTH --> MANAGERS
+  end
+  subgraph Session["Logged-in desktop session"]
+    HYPR["Hyprland / Wayland"]
+    OMARCHY["Quickshell / Omarchy PAM"]
+    MEDIA["PipeWire / MPRIS"]
+    BROWSER["Browser bridge"]
+  end
+  CLIENT <--> API
+  DISC -. host discovery .-> CLIENT
+  MANAGERS --> HYPR
+  MANAGERS --> OMARCHY
+  MANAGERS --> MEDIA
+  MANAGERS <--> BROWSER
 ```
 
----
+Editable Mermaid sources are in [docs/diagrams](docs/ARCHITECTURE.md#diagrams).
 
-## Quick Start Guide
+## How it works
 
-### 1. Install & Start the Linux Host
+1. Start the Linux host service in the logged-in user session.
+2. Display or retrieve the short-lived pairing code from the host.
+3. Enter the code in the Android app.
+4. The client stores its pairing material and host identity using Android encrypted storage.
+5. Subsequent API and WebSocket requests use TLS with host certificate pinning and a paired-device bearer token.
+6. The host checks the device and requested capability before dispatching an operation to its manager.
+
+See [pairing and authentication diagram](docs/diagrams/pairing-and-authentication.mmd) and [security model](docs/SECURITY.md).
+
+## Requirements
+
+### Android
+
+- Android 10 (API 29) or later.
+- Android Studio or command-line Android SDK for development.
+- JDK 21 for Gradle builds.
+
+### Linux host
+
+- Linux desktop session; the best-tested target is Omarchy with Hyprland and Wayland.
+- Node.js 26 and npm.
+- User-session access to the desktop utilities required by the features being used.
+- Avahi/mDNS support for network discovery, where available.
+- Additional optional tools for specific integrations, such as `hyprctl`, `grim`, `wpctl`, `busctl`, `wl-copy` and `wl-paste`.
+
+Some capabilities are Omarchy/Quickshell-specific. Review [installation requirements](docs/INSTALLATION.md) before using the application.
+
+## Installation
+
+The detailed guide is in [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+Quick host setup:
+
 ```bash
-# Run installer (creates systemd user service + desktop icon)
+git clone https://github.com/axonel/regnant.git
+cd regnant
 bash linux/scripts/install.sh
-
-# Open the desktop companion
-regnant-desktop
 ```
 
-### 2. Install & Open Android Application
-The debug APK is compiled at:
-`android/app/build/outputs/apk/debug/app-debug.apk`
+The installer creates a user-level systemd service and a desktop launcher. It assumes the host environment and tools documented in the installation guide.
+
+Build the Android debug APK:
 
 ```bash
-# Install to device via ADB
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-
-# Launch the app
-adb shell am start -n org.regnant.android/.MainActivity
+cd android
+./gradlew assembleDebug
 ```
 
-### 3. Pair Devices Once
-1. On the Linux laptop, Regnant displays a 6-character code (e.g. `RG-XC3M`).
-2. On Android, tap **Enter Pairing Code** and input the code.
-3. Both devices exchange cryptographic credentials and pin the host's TLS certificate.
-4. The status pill turns green **CONNECTED**.
+The APK is generated at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-### 4. Control Your Workstation
-- Tap **Terminal** to launch `foot`.
-- Tap **Brave** to open Brave browser.
-- Tap **Files** to open Nautilus file manager.
-- Tap **Projects** to view and launch workspaces (`MAD`, `WrongStack`, etc.) into VS Code or Foot.
-- Say or type `"open downloads"` or `"open brave"`.
-- Check live battery, CPU, RAM, and home storage on the **Status** tab.
-- Browse and preview workstation code files on the **Files** tab.
+## Development
 
----
+See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the toolchain and contribution workflow.
 
-## Testing & Quality Assurance
+Linux host tests:
 
 ```bash
-# Run all host unit, expansion, and integration test suites
 cd linux/host
-node --test test/host.test.js
-node --test test/expansion.test.js
-node --test test/integration.test.js
+npm ci
+npm test
 ```
+
+Android build and test task:
+
+```bash
+cd android
+./gradlew testDebugUnitTest assembleDebug
+```
+
+At the time of this repository preparation, the host suite reports **34 passing tests**. The Android Gradle test task reports `NO-SOURCE`, meaning no Android unit tests are currently defined. See [development guide](docs/DEVELOPMENT.md).
+
+## Repository layout
+
+```text
+regnant/
+├── android/                  # Native Android app (Kotlin / Compose)
+├── linux/
+│   ├── host/                 # Node.js host service and tests
+│   ├── desktop/              # Electron desktop companion
+│   ├── browser-extension/    # Chromium Manifest V3 extension
+│   ├── omarchy/              # Omarchy integration patch
+│   └── scripts/              # Host installer and uninstaller
+├── shared/                   # Shared protocol definitions
+├── assets/                   # App icons and genuine UI screenshots
+├── docs/                     # Architecture, security and operator guides
+└── .github/                  # CI, issue templates and PR template
+```
+
+## Security
+
+Regnant exposes workstation operations to paired devices. Treat pairing credentials as sensitive and do not expose the host service to untrusted networks.
+
+Important notes:
+- Local-network membership is not authentication.
+- Host capabilities and paired-device revocation are enforced by the host.
+- Remote unlock delegates to Omarchy's PAM flow; the login password is transmitted over the authenticated local TLS connection and exists transiently in memory.
+- The browser extension requests broad website host permissions. Review the manifest before enabling it in a sensitive browser profile.
+- This project has not undergone an independent security audit.
+
+Read [SECURITY.md](SECURITY.md) and [docs/SECURITY.md](docs/SECURITY.md) before deployment. Report vulnerabilities privately through GitHub's Security tab.
+
+## Known limitations
+
+- The strongest integration target is Omarchy / Hyprland / Wayland, not every Linux desktop environment.
+- Android background connectivity can be affected by OEM battery management.
+- Wi-Fi client isolation can prevent peer-to-peer connectivity.
+- Browser extension installation and live browser control require manual setup.
+- Wake-on-LAN requires compatible firmware, NIC and network configuration.
+- Some subsystems have automated unit coverage but need further physical-device and real-environment acceptance testing.
+
+See [the full limitations list](docs/KNOWN_LIMITATIONS.md).
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), read the architecture and security notes, and open a focused pull request.
+
+## Roadmap
+
+The roadmap is maintained through GitHub issues and discussions. Please check existing proposals before starting a substantial feature.
+
+## License
+
+Regnant is distributed under the [MIT License](LICENSE).

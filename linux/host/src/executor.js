@@ -5,7 +5,9 @@ import { spawn } from 'node:child_process';
 import { ACTIONS, TARGETS } from '../../../shared/protocol.js';
 
 export class ActionExecutor {
-  constructor() {
+  constructor({ homeDir = os.homedir(), existsSync = fs.existsSync } = {}) {
+    this.homeDir = homeDir;
+    this.existsSync = existsSync;
     this.appMap = this.detectInstalledApplications();
   }
 
@@ -13,7 +15,7 @@ export class ActionExecutor {
    * Discovers and maps actual installed binaries on this system based on the environment audit.
    */
   detectInstalledApplications() {
-    const homeDir = os.homedir();
+    const homeDir = this.homeDir;
     const map = {
       [TARGETS.TERMINAL]: null,
       [TARGETS.BRAVE]: null,
@@ -26,7 +28,7 @@ export class ActionExecutor {
     // Terminal candidates
     const terminalCandidates = ['/usr/bin/foot', '/usr/bin/alacritty', '/usr/bin/kitty', '/usr/bin/ghostty'];
     for (const c of terminalCandidates) {
-      if (fs.existsSync(c)) {
+      if (this.existsSync(c)) {
         map[TARGETS.TERMINAL] = { exec: c, args: [] };
         break;
       }
@@ -35,7 +37,7 @@ export class ActionExecutor {
     // Brave / Browser candidates
     const browserCandidates = ['/usr/bin/brave', '/usr/bin/brave-browser', '/usr/bin/chromium', '/usr/bin/firefox'];
     for (const c of browserCandidates) {
-      if (fs.existsSync(c)) {
+      if (this.existsSync(c)) {
         map[TARGETS.BRAVE] = { exec: c, args: [] };
         break;
       }
@@ -44,7 +46,7 @@ export class ActionExecutor {
     // File manager candidates
     const fmCandidates = ['/usr/bin/nautilus', '/usr/bin/thunar', '/usr/bin/dolphin', '/usr/bin/pcmanfm'];
     for (const c of fmCandidates) {
-      if (fs.existsSync(c)) {
+      if (this.existsSync(c)) {
         map[TARGETS.FILE_MANAGER] = { exec: c, args: [] };
         break;
       }
@@ -58,7 +60,7 @@ export class ActionExecutor {
       '/usr/bin/galculator'
     ];
     for (const c of calcCandidates) {
-      if (fs.existsSync(c)) {
+      if (this.existsSync(c)) {
         map[TARGETS.CALCULATOR] = { exec: c, args: [] };
         break;
       }

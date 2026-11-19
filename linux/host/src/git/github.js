@@ -2,9 +2,13 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
 export class GitHubManager {
+  constructor({ runCommand = execFileSync } = {}) {
+    this.runCommand = runCommand;
+  }
+
   checkAuth() {
     try {
-      const out = execFileSync('gh', ['auth', 'status'], {
+      const out = this.runCommand('gh', ['auth', 'status'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 4000
@@ -19,7 +23,6 @@ export class GitHubManager {
         scopes: scopesMatch ? scopesMatch[1].replace(/['\s]/g, '').split(',') : []
       };
     } catch (err) {
-      // gh auth status prints output to stderr if not logged in or on some versions
       const errOut = (err.stderr || '') + (err.stdout || '');
       const loggedIn = errOut.includes('Logged in to github.com');
       const accountMatch = errOut.match(/account\s+([a-zA-Z0-9_-]+)/);
@@ -39,7 +42,7 @@ export class GitHubManager {
     }
     const safeLimit = Math.max(1, Math.min(limit, 50));
     try {
-      const out = execFileSync('gh', [
+      const out = this.runCommand('gh', [
         'pr', 'list',
         '--limit', String(safeLimit),
         '--json', 'number,title,author,state,isDraft,headRefName,baseRefName,updatedAt,url'
@@ -55,6 +58,9 @@ export class GitHubManager {
       if (msg.includes('no git remotes')) {
         return { error: 'No GitHub remotes found for this repository' };
       }
+      if (err.code === 'ENOENT') {
+        return { error: 'GitHub CLI (gh) is not installed on this host' };
+      }
       throw new Error(`Failed to list pull requests: ${msg.trim()}`);
     }
   }
@@ -67,7 +73,7 @@ export class GitHubManager {
     if (isNaN(num)) throw new Error('Invalid PR number');
 
     try {
-      const out = execFileSync('gh', [
+      const out = this.runCommand('gh', [
         'pr', 'view', String(num),
         '--json', 'number,title,body,author,state,headRefName,baseRefName,createdAt,url,reviews,comments'
       ], {
@@ -78,7 +84,8 @@ export class GitHubManager {
       });
       return JSON.parse(out);
     } catch (err) {
-      throw new Error(`Failed to view PR #${num}: ${(err.stderr || err.message).trim()}`);
+      const reason = err.code === 'ENOENT' ? 'GitHub CLI (gh) is not installed on this host' : (err.stderr || err.message);
+      throw new Error(`Failed to view PR #${num}: ${reason.trim()}`);
     }
   }
 
@@ -88,7 +95,7 @@ export class GitHubManager {
     }
     const safeLimit = Math.max(1, Math.min(limit, 50));
     try {
-      const out = execFileSync('gh', [
+      const out = this.runCommand('gh', [
         'run', 'list',
         '--limit', String(safeLimit),
         '--json', 'databaseId,name,headBranch,headSha,status,conclusion,event,createdAt,url'
@@ -104,6 +111,9 @@ export class GitHubManager {
       if (msg.includes('no git remotes')) {
         return { error: 'No GitHub remotes found for this repository' };
       }
+      if (err.code === 'ENOENT') {
+        return { error: 'GitHub CLI (gh) is not installed on this host' };
+      }
       throw new Error(`Failed to list workflow runs: ${msg.trim()}`);
     }
   }
@@ -116,7 +126,7 @@ export class GitHubManager {
     if (!safeId) throw new Error('Invalid workflow run ID');
 
     try {
-      const out = execFileSync('gh', [
+      const out = this.runCommand('gh', [
         'run', 'view', safeId,
         '--log'
       ], {
@@ -126,10 +136,10 @@ export class GitHubManager {
         maxBuffer: 2 * 1024 * 1024,
         timeout: 15000
       });
-      // Cap log output to 100 KB
       return out.length > 100000 ? (out.slice(-100000) + '\n[Log truncated: displaying last 100 KB]') : out;
     } catch (err) {
-      throw new Error(`Failed to get run log: ${(err.stderr || err.message).trim()}`);
+      const reason = err.code === 'ENOENT' ? 'GitHub CLI (gh) is not installed on this host' : (err.stderr || err.message);
+      throw new Error(`Failed to get run log: ${reason.trim()}`);
     }
   }
 }

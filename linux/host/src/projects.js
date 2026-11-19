@@ -6,12 +6,14 @@ import { dbManager } from './db.js';
 import { actionExecutor } from './executor.js';
 
 export class ProjectManager {
-  constructor() {
+  constructor({ home = os.homedir(), existsSync = fs.existsSync } = {}) {
+    this.home = home;
+    this.existsSync = existsSync;
     this.installedIdes = this.detectInstalledIdes();
   }
 
   detectInstalledIdes() {
-    const home = os.homedir();
+    const home = this.home;
     const ides = {};
 
     const candidates = [
@@ -24,7 +26,7 @@ export class ProjectManager {
 
     for (const c of candidates) {
       for (const p of c.paths) {
-        if (fs.existsSync(p)) {
+        if (this.existsSync(p)) {
           ides[c.id] = { id: c.id, name: c.name, exec: p };
           break;
         }

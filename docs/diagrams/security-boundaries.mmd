@@ -1,0 +1,12 @@
+flowchart LR
+  PHONE["Paired Android device"]
+  NETWORK["Untrusted local network"]
+  HOST["Regnant host boundary"]
+  AUTH["TLS identity and device token"]
+  CAPS["Per-device capability policy"]
+  MANAGERS["Operation-specific managers"]
+  SESSION["Logged-in Linux session"]
+  PHONE --> NETWORK --> HOST
+  HOST --> AUTH --> CAPS --> MANAGERS --> SESSION
+  NOTE["Local network membership alone does not grant authority"]
+  NETWORK -.-> NOTE
