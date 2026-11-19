@@ -5,7 +5,7 @@ import { WebSocket } from 'ws';
 import { HostServer } from '../src/server.js';
 import { cryptoManager } from '../src/crypto.js';
 import { dbManager } from '../src/db.js';
-import { TASK_STATUS, WS_EVENTS } from '../../../shared/protocol.js';
+import { ACTIONS, TASK_STATUS, WS_EVENTS } from '../../../shared/protocol.js';
 
 // Helper for https requests ignoring self-signed test cert
 function requestJson(url, options = {}, body = null) {
@@ -92,12 +92,13 @@ test('Integration — Server startup, pairing, authenticated commands, replay & 
       },
     }, {
       requestId: reqId1,
-      rawCommand: 'open terminal',
+      action: ACTIONS.GET_METRICS,
+      target: 'system',
     });
 
     assert.equal(cmdRes.status, 200);
     assert.equal(cmdRes.data.status, TASK_STATUS.COMPLETED);
-    assert.ok(cmdRes.data.message.includes('foot'));
+    assert.ok(cmdRes.data.message.includes('CPU:'));
 
     // 6. Submit replayed command with same requestId -> Must be rejected
     const replayRes = await requestJson(`https://127.0.0.1:${TEST_PORT}/api/v1/commands`, {
@@ -108,7 +109,8 @@ test('Integration — Server startup, pairing, authenticated commands, replay & 
       },
     }, {
       requestId: reqId1, // Same ID
-      rawCommand: 'open terminal',
+      action: ACTIONS.GET_METRICS,
+      target: 'system',
     });
     assert.equal(replayRes.status, 400);
     assert.equal(replayRes.data.status, TASK_STATUS.REJECTED);

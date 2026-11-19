@@ -3,8 +3,12 @@ import path from 'node:path';
 import { dbManager } from './db.js';
 
 export class FileBrowser {
+  constructor(database = dbManager) {
+    this.database = database;
+  }
+
   getApprovedRoots() {
-    return dbManager.listApprovedRoots();
+    return this.database.listApprovedRoots();
   }
 
   isPathWithinApprovedRoots(targetPath) {

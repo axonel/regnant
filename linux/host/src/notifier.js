@@ -7,7 +7,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICON_PATH = path.resolve(__dirname, '../../../assets/icon-48.png');
 
 export class DesktopNotifier {
-  constructor() {
+  constructor({ spawnProcess = spawn } = {}) {
+    this.spawnProcess = spawnProcess;
     this.lastNotifications = new Map(); // key -> timestamp
     this.debounceWindowMs = 5000; // Deduplicate within 5 seconds
   }
@@ -35,11 +36,14 @@ export class DesktopNotifier {
     }
 
     try {
-      const child = spawn('/usr/bin/notify-send', args, {
+      const child = this.spawnProcess('/usr/bin/notify-send', args, {
         detached: true,
         stdio: 'ignore',
       });
-      child.unref();
+      // Child-process launch failures are emitted asynchronously. A missing
+      // desktop notification daemon must never crash the host service.
+      child.on?.('error', () => {});
+      child.unref?.();
     } catch (e) {
       // Non-fatal if notify-send fails
     }

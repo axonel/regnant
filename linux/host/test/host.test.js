@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { commandParser } from '../src/parser.js';
-import { actionExecutor } from '../src/executor.js';
+import { ActionExecutor } from '../src/executor.js';
 import { CryptoManager } from '../src/crypto.js';
 import { DatabaseManager } from '../src/db.js';
 import { ACTIONS, TARGETS, TASK_STATUS } from '../../../shared/protocol.js';
@@ -60,14 +60,26 @@ test('CommandParser — rejection of unsupported or malicious inputs', () => {
   }
 });
 
-test('ActionExecutor — detects real desktop applications', () => {
-  const apps = actionExecutor.getSupportedApplications();
-  assert.ok(apps.terminal.includes('foot'), 'Should detect foot terminal');
-  assert.ok(apps.brave.includes('brave'), 'Should detect brave browser');
-  assert.ok(apps.fileManager.includes('nautilus'), 'Should detect nautilus file manager');
-  assert.ok(apps.calculator.includes('omacalc'), 'Should detect omacalc');
-  assert.ok(apps.downloads.includes('Downloads'), 'Should point to Downloads folder');
-  assert.ok(apps.home.length > 0, 'Should point to home folder');
+test('ActionExecutor — discovers supported applications from an isolated fixture', () => {
+  const homeDir = path.join(os.tmpdir(), 'regnant-action-executor-home');
+  const available = new Set([
+    '/usr/bin/foot',
+    '/usr/bin/brave',
+    '/usr/bin/nautilus',
+    path.join(homeDir, '.local/bin/omacalc'),
+  ]);
+  const executor = new ActionExecutor({
+    homeDir,
+    existsSync: candidate => available.has(candidate),
+  });
+  const apps = executor.getSupportedApplications();
+
+  assert.equal(apps.terminal, '/usr/bin/foot');
+  assert.equal(apps.brave, '/usr/bin/brave');
+  assert.equal(apps.fileManager, '/usr/bin/nautilus');
+  assert.equal(apps.calculator, path.join(homeDir, '.local/bin/omacalc'));
+  assert.equal(apps.downloads, path.join(homeDir, 'Downloads'));
+  assert.equal(apps.home, homeDir);
 });
 
 test('CryptoManager — pairing code lifecycle, rate-limiting & single use', () => {
