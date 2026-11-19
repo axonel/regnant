@@ -17,5 +17,8 @@
     "bonjour-service": "^1.4.4",
     "node-pty": "^1.1.0",
     "ws": "^8.23.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }
