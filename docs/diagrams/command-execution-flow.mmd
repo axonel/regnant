@@ -1,0 +1,10 @@
+flowchart TD
+  INPUT["Android action or typed command"] --> TLS["Authenticated TLS request"]
+  TLS --> DEVICE["Validate paired device"]
+  DEVICE --> CAP["Check requested capability"]
+  CAP --> VALID{"Input valid and supported?"}
+  VALID -- No --> REJECT["Reject with explicit error"]
+  VALID -- Yes --> MANAGER["Dispatch to operation-specific manager"]
+  MANAGER --> RESULT["Return result or emit event"]
+  REJECT --> RESPONSE["Android receives failure"]
+  RESULT --> RESPONSE

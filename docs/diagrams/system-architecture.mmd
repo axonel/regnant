@@ -1,0 +1,34 @@
+flowchart TB
+  subgraph Mobile["Android device"]
+    UI["Jetpack Compose UI"]
+    NET["TLS / WebSocket client"]
+    STORE["Encrypted credential store"]
+    UI --> NET
+    NET <--> STORE
+  end
+  subgraph LAN["Local network"]
+    DISC["mDNS / DNS-SD discovery"]
+    TLS["TLS 1.3 authenticated channel"]
+  end
+  subgraph Host["Linux host service"]
+    API["HTTPS and WebSocket API"]
+    AUTH["Device auth and capability checks"]
+    DB[("SQLite state")]
+    MOD["Operation managers"]
+    API --> AUTH
+    AUTH <--> DB
+    AUTH --> MOD
+  end
+  subgraph Desktop["Logged-in desktop session"]
+    HYPR["Hyprland / Wayland"]
+    QS["Quickshell / Omarchy PAM"]
+    AUDIO["PipeWire / MPRIS"]
+    BROWSER["Browser bridge"]
+  end
+  NET --> TLS
+  DISC -. discovery .-> NET
+  TLS <--> API
+  MOD --> HYPR
+  MOD --> QS
+  MOD --> AUDIO
+  MOD <--> BROWSER

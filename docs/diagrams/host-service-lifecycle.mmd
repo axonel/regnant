@@ -1,0 +1,12 @@
+stateDiagram-v2
+  [*] --> Starting
+  Starting --> Initializing: load configuration and state
+  Initializing --> Listening: HTTPS/WSS and discovery ready
+  Listening --> Connected: authenticated client connects
+  Connected --> Listening: client disconnects
+  Listening --> Recovering: service or dependency failure
+  Connected --> Recovering: host session interruption
+  Recovering --> Initializing: retry initialization
+  Listening --> Stopping: user or service stop
+  Connected --> Stopping: shutdown
+  Stopping --> [*]
