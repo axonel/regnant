@@ -11,6 +11,7 @@ The primary integration target is Omarchy Linux with Hyprland and Wayland. Other
 - Wayland session for desktop controls.
 - Optional utilities for specific features: `hyprctl`, `grim`, `wpctl`, `busctl`, `wl-copy`, `wl-paste` and Omarchy/Quickshell.
 - Network access between the Android device and laptop for direct local control.
+- Optional: GitHub CLI (`gh`) installed and authenticated with `gh auth login` for remote pull-request and workflow operations.
 
 ## Install the host
 

@@ -11,7 +11,7 @@ This is an implementation-oriented inventory, not a guarantee that every capabil
 | Remote lock/unlock | Power manager and Omarchy integration | Lock and PAM-backed Omarchy unlock | Requires Omarchy/Quickshell/PAM |
 | Terminal | Terminal manager | Persistent PTY sessions | Host manager tests; manual interactive acceptance remains useful |
 | AI adapters | Agent modules | CLI discovery and adapter integration points | CLI-specific streaming must be verified independently |
-| Git/GitHub | Git managers | Local repository and GitHub-oriented operations | Host tests; requires local Git/GitHub CLI configuration |
+| Git/GitHub | Git managers | Local repository and GitHub-oriented operations | Host tests; remote GitHub operations require GitHub CLI (`gh`) installed and authenticated |
 | Desktop capture | Desktop peek manager | Capture active desktop output | Requires Wayland capture environment |
 | Audio/media | Audio/media manager | PipeWire volume and MPRIS state/actions | Requires user-session services |
 | Search | Search manager | Local indexed search | Host tests |

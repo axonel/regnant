@@ -173,7 +173,7 @@ cd android
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-At the time of this repository preparation, the host suite reports **32 passing tests**. The Android Gradle test task reports `NO-SOURCE`, meaning no Android unit tests are currently defined. See [development guide](docs/DEVELOPMENT.md).
+At the time of this repository preparation, the host suite reports **34 passing tests**. The Android Gradle test task reports `NO-SOURCE`, meaning no Android unit tests are currently defined. See [development guide](docs/DEVELOPMENT.md).
 
 ## Repository layout
 

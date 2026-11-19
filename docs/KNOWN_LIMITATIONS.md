@@ -13,7 +13,7 @@ This document records platform and verification boundaries. A component's existe
 
 ## Feature verification
 
-The Linux host automated suite currently covers 32 tests. This does not prove physical-device operation of every integration.
+The Linux host automated suite currently covers 34 tests. This does not prove physical-device operation of every integration.
 
 - AI agent adapters can detect and describe installed CLIs; interactive task streaming must be validated separately for each CLI version.
 - Browser extension installation and live browser control require manual browser-side setup and acceptance testing.
@@ -22,6 +22,7 @@ The Linux host automated suite currently covers 32 tests. This does not prove ph
 - Automation rule persistence and trigger matching are tested; each real-world trigger source requires separate verification.
 - Android Gradle currently reports no unit-test source files.
 - Some platform modules may be unavailable outside the developer's Omarchy/Hyprland machine.
+- Remote GitHub operations require the optional GitHub CLI (`gh`) and a valid local authentication session; without it, Regnant reports the integration as unavailable.
 
 ## Network
 
