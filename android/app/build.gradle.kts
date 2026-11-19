@@ -53,7 +53,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // Security & Keystore
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -62,7 +62,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.15.0")
 
     // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
